@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "effective-inference"
+version = "0.1.0"
+description = ""
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+packages = [{include = "effective_inference"}]
+
+[tool.poetry.dependencies]
+python = "3.11.3"
+transformers = "^4.30.2"
+torch = "2.0.0"
+jupyter = "^1.0.0"
+datasets = "^2.13.1"
+scikit-learn = "^1.2.2"
+nltk = "^3.8.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
