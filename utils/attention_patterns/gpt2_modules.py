@@ -4,7 +4,7 @@ import math
 import os
 import warnings
 from dataclasses import dataclass
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, List
 from copy import deepcopy
 
 import torch
@@ -17,6 +17,9 @@ from transformers.pytorch_utils import prune_conv1d_layer, find_pruneable_heads_
 WINDOW_SIZE = 5
 
 class MeanGPT2Attention(GPT2Attention):
+
+    def set_window_size(self, window_size):
+        self.WINDOW_SIZE = window_size
     
     def forward(
             self,
@@ -27,6 +30,7 @@ class MeanGPT2Attention(GPT2Attention):
             encoder_hidden_states: Optional[torch.Tensor] = None,
             encoder_attention_mask: Optional[torch.FloatTensor] = None,
             use_cache: Optional[bool] = False,
+            special_tokens_idxs: Optional[List[int]] = [0],
             output_attentions: Optional[bool] = False) -> Tuple[Union[torch.Tensor, Tuple[torch.Tensor]], ...]:
 
         if encoder_hidden_states is not None:
@@ -50,7 +54,10 @@ class MeanGPT2Attention(GPT2Attention):
         return outputs # Return the mean hidden states
     
 class WindowMEANGPT2Attention(GPT2Attention):
-    
+
+    def set_window_size(self, window_size):
+        self.WINDOW_SIZE = window_size
+
     def forward(
             self,
             hidden_states: Optional[Tuple[torch.FloatTensor]],
@@ -60,6 +67,7 @@ class WindowMEANGPT2Attention(GPT2Attention):
             encoder_hidden_states: Optional[torch.Tensor] = None,
             encoder_attention_mask: Optional[torch.FloatTensor] = None,
             use_cache: Optional[bool] = False,
+            special_tokens_idxs: Optional[List[int]] = [0],
             output_attentions: Optional[bool] = False) -> Tuple[Union[torch.Tensor, Tuple[torch.Tensor]], ...]:
 
         if encoder_hidden_states is not None:
@@ -100,7 +108,10 @@ class WindowGPT2Attention(GPT2Attention):
     Implementation: insted of (n, d) x (d, n) matmul we have (n, d) x (d, k) matmul 
     That means we need to cut Q and V matricies by taking k-sized window. 
     """
-    
+
+    def set_window_size(self, window_size):
+        self.WINDOW_SIZE = window_size
+
     def forward(
             self,
             hidden_states: Optional[Tuple[torch.FloatTensor]],
@@ -110,6 +121,7 @@ class WindowGPT2Attention(GPT2Attention):
             encoder_hidden_states: Optional[torch.Tensor] = None,
             encoder_attention_mask: Optional[torch.FloatTensor] = None,
             use_cache: Optional[bool] = False,
+            special_tokens_idxs: Optional[List[int]] = [0],
             output_attentions: Optional[bool] = False) -> Tuple[Union[torch.Tensor, Tuple[torch.Tensor]], ...]:
 
         if encoder_hidden_states is not None:
@@ -215,9 +227,10 @@ class WindowGPT2Attention(GPT2Attention):
             
             l, r = max(0, i-WINDOW_SIZE+1), i
             window = list(range(l, r+1))
-            if 0 not in window:
-                window.append(0)
-            
+            for special_token_idx in self.special_tokens:
+                if special_token_idx not in window:
+                    window.append(special_token_idx)
+
             attn_weights_i = nn.functional.softmax(attn_weights[:, :, i, window], dim=-1)
             attn_weights_i = attn_weights_i.view(attn_weights_i.shape[0], attn_weights_i.shape[1], 1, attn_weights_i.shape[2])
             #print(attn_weights_i.shape)
@@ -248,7 +261,7 @@ class WindowGPT2Attention(GPT2Attention):
 
 
 class GPT2Wrapper(nn.Module):
-    def __init__(self, model, new_attention_class):
+    def __init__(self, model, new_attention_class,layer_nums=None, window_size=2):
         super().__init__()
 
         self.gpt2_model = deepcopy(model)
@@ -256,10 +269,15 @@ class GPT2Wrapper(nn.Module):
         # Create a list of modules to modify
         modules_to_modify = []
         for i in range(12):
-            mean_attention = new_attention_class(self.gpt2_model.config)
-            mean_attention.load_state_dict(self.gpt2_model.h[i].attn.state_dict())
-            self.gpt2_model.h[i].attn = mean_attention
+            if (layer_nums is not None and i in layer_nums) or (layer_nums is None):
+                mean_attention = new_attention_class(self.gpt2_model.config)
+                mean_attention.set_window_size(window_size)
+                mean_attention.load_state_dict(self.gpt2_model.h[i].attn.state_dict())
+                self.gpt2_model.h[i].attn = mean_attention
             
 
-    def forward(self, *args, **kwargs):
-        return self.gpt2_model(*args, **kwargs)
+    def forward(self, special_tokens_idxs, *args, **kwargs):
+        for i in range(12):
+            if (self.layer_nums is not None and i in self.layer_nums) or (self.layer_nums is None):
+                self.gpt2_model.encoder.layer[i].attention.self.set_special_tokens(special_tokens_idxs)
+        return self.gpt2_model(*args, **kwargs, special_tokens_idxs=special_tokens_idxs)
