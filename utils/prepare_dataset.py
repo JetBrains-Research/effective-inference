@@ -3,10 +3,13 @@ from datasets import load_dataset
 from datasets.arrow_dataset import Dataset
 from datasets.dataset_dict import DatasetDict
 
-def load_datasets(benchmark_name: str, dataset_names: List[str], cut_len=None):
+def load_datasets(dataset_names: List[List[str]], cut_len=None):
     ans = {}
-    for name in dataset_names:
-        dataset = load_dataset(benchmark_name, name)
+    for benchmark_name, name in dataset_names:
+        if benchmark_name != '':
+            dataset = load_dataset(benchmark_name, name)
+        else:
+            dataset = load_dataset(name)
         ans[f'{name}'] = dataset
     if cut_len is not None:
         ans = cut_datasets(ans, cut_len)

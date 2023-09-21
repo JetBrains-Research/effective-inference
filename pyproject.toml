@@ -17,6 +17,7 @@ nltk = "^3.8.1"
 glances = "^3.4.0.3"
 h5py = "^3.9.0"
 datetime = "^5.2"
+seaborn = "^0.12.2"
 
 
 [build-system]
