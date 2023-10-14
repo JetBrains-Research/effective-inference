@@ -22,7 +22,7 @@ def get_dict_batch(samples_arr, device):
     return final
     
 def prepare_batches(dataset_X, dataset_y, n, device):
-    shuffle_idx = np.arange(len(dataset_X))
+    shuffle_idx = np.arange(len(dataset_X)//2)
     np.random.shuffle(shuffle_idx)
     new_dataset = dataset_X[shuffle_idx]
     new_dataset_y = dataset_y[shuffle_idx]

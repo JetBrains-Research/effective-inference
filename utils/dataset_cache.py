@@ -119,9 +119,10 @@ def cache_features_for_regression(config, train_datasets, tokenizer, initial_mod
                                 'inv_relev_pos_to': ((seq_len - to_) / seq_len),
                                 'seq_len': seq_len / config.data.norm_len_factor, 
                                 'inv_seq_len': (1 / seq_len),
-                                'target': np.log(attentions[head_num][from_, to_]),
+                                'target':  np.log(np.where(attentions[head_num][from_, to_] == 0,  1e-10, attentions[head_num][from_, to_])),
                                 'head_num': head_num
                             }
+
                             if config.data.cache_train_features:
                                 with h5py.File(f'{config.data.data_path}/{dataset_name}/layer_{layer}/head_{head_num}/{config.data.train_features_prefix}_{ex_idx}_{from_}_{to_}.hdf5', 'w') as f:
                                     for fn, fv in full_data_to_linear.items():
@@ -129,7 +130,7 @@ def cache_features_for_regression(config, train_datasets, tokenizer, initial_mod
     return
 
 
-def get_dataset_for_regression(config, train_datasets, tokenizer, initial_model, cache_embeddings=False, layer=0, heads=[0], split_for_heads=False):
+def get_dataset_for_regression(config, train_datasets, tokenizer, initial_model, cache_embeddings=False, layer=0, heads=[0], split_for_heads=False, ):
     X_train, y_train = [], []
     X_test, y_test = [], []
     dataset_names = list(train_datasets)
@@ -198,8 +199,8 @@ def get_dataset_for_regression(config, train_datasets, tokenizer, initial_model,
                             'inv_relev_pos_to': ((seq_len - to_) / seq_len),
                             'seq_len': seq_len / config.data.norm_len_factor, 
                             'inv_seq_len': (1 / seq_len),
-                            'target': np.log(attentions[head_num][from_, to_]),
-                            'head_num': head_num
+                            'target': np.log(np.where(attentions[head_num][from_, to_] == 0,  1e-10, attentions[head_num][from_, to_])),
+                            'head_num': head_nums
                         }
                         if config.data.cache_train_features:
                             with h5py.File(f'{config.data.data_path}/{dataset_name}/layer_{layer}/head_{head_num}/{config.data.train_features_prefix}_{ex_idx}_{from_}_{to_}.hdf5', 'w') as f:
@@ -215,7 +216,8 @@ def get_dataset_for_regression(config, train_datasets, tokenizer, initial_model,
                                 feature_vector += list(full_data_to_linear[feature_name])
                                 
                         X_train.append(feature_vector)
-                        y_train.append(np.log(attentions[head_num][from_, to_])) 
+                        y_train.append(np.log(np.where(attentions[head_num][from_, to_] == 0, attentions[head_num][from_, to_],
+                                                          attentions[head_num][from_, to_] + 1e-10)))
 
     l = round(len(X_train)*config.data.train_prop)
     X_test = np.array(X_train[l:])

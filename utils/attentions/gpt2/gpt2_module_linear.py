@@ -45,6 +45,8 @@ class LinearAttention(nn.Module):
     def forward(self, seq_len_arg=None, **kwargs):
         if seq_len_arg is not None:
             result = torch.zeros((self.batch_size, seq_len_arg, seq_len_arg), device=self.device)
+            # print(self.batch_size)
+            
             
             for arg_name, arg_value in kwargs.items():
                 namespace = {'cur_result': None, 'self': self, 'arg_name': arg_name, 'arg_value': arg_value}
@@ -53,9 +55,13 @@ class LinearAttention(nn.Module):
                 else:
                     exec(f"cur_result = self.{arg_name} * arg_value", namespace)
                 if 'from' in arg_name:
-                    result += namespace['cur_result'].T
+                    result += torch.mean(namespace['cur_result'], dim=0, keepdim=True).T
                 else:
-                    result += namespace['cur_result']
+                    # print(*result.shape)
+                    # print(f"cur_result = self.{arg_name}(arg_value)")
+                    # print(arg_value.shape)
+                    # print(namespace['cur_result'].shape)
+                    result += torch.mean(namespace['cur_result'], dim=0, keepdim=True)
         else:
             for arg_name, arg_value in kwargs.items():
                 bs = len(arg_value)
@@ -162,16 +168,19 @@ class LinearClassifierGPTAttention(GPT2Attention):
             attention_probs = torch.stack(attentions, dim=1)
             context_layer = torch.matmul(attention_probs, value)
     
-            context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
-            new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
-            context_layer = context_layer.view(new_context_layer_shape)
-    
-            attn_output = (context_layer, attention_probs) if output_attentions else (context_layer,)
-            # attn_output = torch.vstack(attn_output)
+            attn_output = self._merge_heads(context_layer, self.num_heads, self.head_dim)
+            attn_output = self.c_proj(attn_output)
+            attn_output = self.resid_dropout(attn_output)
+            # print(context_layer.shape, attn_output.shape)
+                    
             outputs = (attn_output, None)
             if output_attentions:
-                outputs += (None,)
+                outputs += (attention_probs, )
+            # print(attention_probs.shape, context_layer.shape)
             return outputs
+
+
+        
 
         else:
             seq_len = hidden_states.shape[1]
@@ -203,20 +212,23 @@ class LinearClassifierGPTAttention(GPT2Attention):
 
                     attention_probs = torch.stack(attentions, dim=1)
                     context_layer = torch.matmul(attention_probs, value.squeeze(1))
-                    context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
-                    print(type(context_layer))
-                    print(context_layer.shape)
+                    # context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
+                    
                     # context_layer = context_layer.view(new_context_layer_shape)
             
-                    attn_output = (context_layer, None)
+                    # attn_output = (context_layer, None)
                     # attn_output = torch.vstack(attn_output)
-                    print(attn_output)
-                    print(attn_output[0].shape)
+                    # print(context_layer.shape)
+                    attn_output = self._merge_heads(context_layer, self.num_heads, self.head_dim)
+                    attn_output = self.c_proj(attn_output)
+                    attn_output = self.resid_dropout(attn_output)
+                    # print(context_layer.shape, attn_output.shape)
+                    
                     outputs = (attn_output, None)
-                    print(type(outputs[0]))
                     if output_attentions:
-                        outputs += (None, )
-                    print(type(outputs[0]))
+                        outputs += (attention_probs, )
+                    # print(attention_probs.shape, context_layer.shape)
+                    # print(type(outputs[0]))
 
                     return outputs
                 
@@ -227,15 +239,20 @@ class LinearClassifierGPTAttention(GPT2Attention):
                 attention_probs = nn.Sigmoid()(torch.exp(predicted_attention))  # torch.nn.functional.softmax(predicted_attention, dim=-1)
                 context_layer = torch.matmul(attention_probs, value.squeeze(1))
         
-                context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
-                new_context_layer_shape = value.shape[3]
-                attn_output = context_layer.view(new_context_layer_shape)
+                context_layer = context_layer #.permute(0, 2, 1, 3).contiguous()
+                #new_context_layer_shape = value.shape[3]
+                #attn_output = context_layer.view(new_context_layer_shape)
+
+                attn_output = self._merge_heads(context_layer, self.num_heads, self.head_dim)
+                attn_output = self.c_proj(attn_output)
+                attn_output = self.resid_dropout(attn_output)
         
                 # attn_output = (context_layer, attention_probs) if output_attentions else (context_layer,)
                 # attn_output = torch.vstack(attn_output)
                 outputs = (attn_output, None)
                 if output_attentions:
-                    outputs += (None,)
+                    outputs += (attention_probs, )
+                # print(attention_probs.shape, attn_output.shape)
                     
                 return outputs
 

@@ -26,6 +26,10 @@ def train_epoch(model, optimizer, loss_fn, X_train, y_train, config, scheduler=N
         optimizer.zero_grad()
         
         result = model(**x_batch)
+        
+        
+        result = result.to(torch.float64)
+        y_batch = y_batch.to(torch.float64)
         loss = loss_fn(result, y_batch)
 
         loss.backward()
