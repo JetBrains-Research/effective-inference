@@ -223,9 +223,10 @@ def evaluate_squad(val_dataset, model, tokenizer, config):
             end_pred = torch.argmax(outputs['end_logits'], dim=-1)
             acc.append(((start_pred == start_true).sum()/len(start_pred)).item())
             acc.append(((end_pred == end_true).sum()/len(end_pred)).item())
-            if start_pred[0]==start_true[0]:
-                print(batch['input_ids'])
-                print(tokenizer.decode(batch['input_ids']))
+            if start_pred==start_true or end_pred[0]==end_true[0]:
+                print(tokenizer.decode(batch['input_ids'][0][0]).split('.')[-1])
+                print(tokenizer.decode(batch['input_ids'][0][0][start_pred:end_pred]))
+                
     print(sum(acc)/len(acc))
     return sum(acc)/len(acc)
 
