@@ -1,0 +1,79 @@
+data:
+    data_path: 'data/gpt2'
+    
+    train_datasets:
+      - 'none'
+
+    train_datasets_fields: 
+
+        - ['text', '']
+    
+    eval_datasets:
+       - 'SQUAD'
+       
+
+    eval_datasets_fields:
+        
+    cut_size: 2000 # null or uint
+
+    cache_cut_size: 1000
+    prob_of_take: 0.01
+    cache_train_features: True
+    train_features_prefix: 'not_split'
+    cache_train_dataset: False
+    norm_len_factor: 1024 # 1 vs max_len
+    train_prop: 0.95
+    batch_size: 1
+    num_epochs: 3
+    
+    
+    model_save_pattern: 'window_perplexity_data'
+
+    layers: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    heads: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    
+model:
+    model_name: 'gpt2'
+    attention_aproximation: '' # one of linear, vanilla, window
+    layers_num: 12 # int or arr with layers
+    heads_num: 12 # int or arr with heads
+
+general:
+    device: 'cuda:0'
+    out_prediction: 'data/outputs.json'
+    out_metrics: 'data/metrics.txt'
+    max_len: 1024
+    batch_size: 1
+    d_model: 768
+    num_epochs: 60
+
+attention_config: # hidden_to, hidden_from, pos_to, pos_from, 
+    d_model: 768
+    device: 'cuda:0'
+    features:
+        - 'hidden_to'
+        - 'hidden_from'
+        - 'pos_to'
+        - 'pos_from'
+        - 'relev_pos_from'
+        - 'relev_pos_to'
+        - 'inv_pos_from'
+        - 'inv_pos_to'
+        - 'inv_relev_pos_from'
+        - 'inv_relev_pos_to'
+        - 'seq_len'
+        - 'inv_seq_len'
+        - 'head_num'
+        
+    batch_size: 1
+    train_batch_size: 128
+    num_heads: 12
+    split_heads: False
+    split_heads_in_data: False
+    model_for_each_head: False
+
+    layers_to_train: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    heads_to_train: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    layers_to_change: [0]
+        
+
