@@ -19,7 +19,7 @@ tokenizer = CodeLlamaTokenizer.from_pretrained("codellama/CodeLlama-7b-hf")
 model = LlamaForCausalLM.from_pretrained("codellama/CodeLlama-7b-hf", load_in_8bit=True,
     device_map="auto")
 
-code_data = pd.read_csv('/home/sasha/effective-inference/clean_naming/code_data.csv')
+code_data = pd.read_csv('code_data.csv')
 
 df = pd.DataFrame(columns = ['name_type', 'prompt', 'real', 'generated', 'answer'])
 st = time.time()
@@ -56,7 +56,7 @@ for j in tqdm(range(2)):#code_data.shape[0]):
 
             generate_and_save(ex['numerical_prompt'], ex['numerical_code'], numerical_name, 'Numerical')
             
-            df.to_csv(f'/home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
+            df.to_csv(f'logs/generation_data_{st}.csv')
 
 logging.info(f"---------------------------\n\n")
 logging.info(f"Dataset size is: {acc_dict['all']}")
