@@ -4,11 +4,12 @@ from tqdm import tqdm
 import logging
 import json
 import warnings
+import time
 warnings.filterwarnings("ignore")
 
 
 
-logging.basicConfig(filename='/home/sasha/effective-inference/accurasies.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(filename='/home/sasha/effective-inference/logs/accurasies.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 
@@ -20,6 +21,7 @@ model = LlamaForCausalLM.from_pretrained("codellama/CodeLlama-7b-hf", load_in_8b
 code_data = pd.read_csv('code_data.csv')
 
 df = pd.DataFrame(columns = ['name_type', 'prompt', 'real', 'generated', 'answer'])
+st = time.time()
 
 # logging.info('')
 
@@ -65,11 +67,13 @@ for j in tqdm(range(2)):#code_data.shape[0]):
 
             df.loc[len(df)] = {'name_type':'Numerical','prompt':NUMERICAL_PROMPT, 'real':(numerical_name+"(")+(numerical_name+"(").join(ex['numerical_code'].split(numerical_name+"(")[i-1:]), 'generated':filling, 'answer':filling[:len(numerical_name)] == numerical_name}
 
-            df.to_csv('generation_data.csv')
+            df.to_csv(f'logs/generation_data_{st}.csv')
 
 
 print(acc_dict)
 print(f"Original functions: {acc_dict['original']/acc_dict['all']}")
+logging.info(f"---------------------------\n\n")
+
 logging.info(f"Original functions: {acc_dict['original']/acc_dict['all']}")
 logging.info(f"Original function promt example: {PROMPT}")
 print(f"GPT generated functions: {acc_dict['full_changed_names']/acc_dict['all']}")
