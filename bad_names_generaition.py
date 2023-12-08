@@ -4,14 +4,13 @@ from tqdm import tqdm
 import logging
 import json
 import warnings
+import re
 import time
 warnings.filterwarnings("ignore")
 
 
 
 logging.basicConfig(filename='/home/sasha/effective-inference/clean_naming/logs/accurasies.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-
 
 
 
@@ -25,38 +24,92 @@ df = pd.DataFrame(columns = ['name_type', 'prompt', 'real', 'generated', 'answer
 st = time.time()
 acc_dict = {'all': 0, 'Original':0, 'GPT generated':0, 'Numerical': 0}
 
-def generate_and_save(prompt, code, name, type):
-    # prompt is based on huggingface example
-    PROMPT = prompt + "\n" + (name+"(").join(code.split(name+"(")[:i-1]) + "<FILL_ME>"
-    
+def generate(PROMPT, max_new_tokens = 10):
     # generation
     input_ids = tokenizer(PROMPT, return_tensors="pt")["input_ids"].to('cuda')
-    generated_ids = model.generate(input_ids, max_new_tokens=10)
+    generated_ids = model.generate(input_ids, max_new_tokens=max_new_tokens)
     filling = tokenizer.batch_decode(generated_ids[:, input_ids.shape[1]:], skip_special_tokens = True)[0]
 
+    return filling
     # logging
-    if filling[:len(name)] == name:
-        acc_dict[type]+=1
-    df.loc[len(df)] = {'name_type':type, 'prompt':PROMPT, 'real': (name+"(")+(name+"(").join(code.split(name+"(")[i-1:]), 'generated':filling, 'answer': filling[:len(name)] == name} 
+    
+
+def process_row_next_token(ex, name, bad_name, numerical_name):
+    for i in range(ex['prompt'].count(name+"(")):
+            # print(name, bad_name, numerical_name, "\n\n")
+            acc_dict['all']+=1
+
+            prompt = ex['prompt'] + "\n" + (name+"(").join(ex['code'].split(name+"(")[:i-1]) + "<FILL_ME>"
+            real = (name+"(")+(name+"(").join(ex['code'].split(name+"(")[i-1:])
+            filling = generate(prompt)
+            if filling[:len(name)] == name:
+                acc_dict['Original']+=1
+            df.loc[len(df)] = {'name_type':'Original', 'prompt':prompt, 'real': real, 'generated':filling, 'answer': filling[:len(name)] == name} 
 
 
-for j in tqdm(range(2)):#code_data.shape[0]):
+            prompt = ex['bad_prompt'] + "\n" + (bad_name+"(").join(ex['bad_code'].split(bad_name+"(")[:i-1]) + "<FILL_ME>" 
+            real = (bad_name+"(")+(bad_name+"(").join(ex['bad_code'].split(bad_name+"(")[i-1:])
+            filling = generate(prompt)
+            if filling[:len(bad_name)] == bad_name:
+                acc_dict['GPT generated']+=1
+            df.loc[len(df)] = {'name_type':'GPT generated', 'prompt':prompt, 'real': real, 'generated':filling, 'answer': filling[:len(bad_name)] == bad_name} 
+
+        
+            prompt = ex['numerical_prompt']+ "\n" + (numerical_name+"(").join(ex['numerical_code'].split(numerical_name+"(")[:i-1]) + "<FILL_ME>"
+            real = (numerical_name+"(")+(numerical_name+"(").join(ex['numerical_code'].split(numerical_name+"(")[i-1:])
+            filling = generate(prompt)
+            if filling[:len(numerical_name)] == numerical_name:
+                acc_dict['Numerical']+=1
+            df.loc[len(df)] = {'name_type':'Numerical', 'prompt':prompt, 'real': real, 'generated':filling, 'answer': filling[:len(numerical_name)] == numerical_name} 
+            
+            df.to_csv(f'/home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
+        
+
+def process_row_line(ex, name, bad_name, numerical_name):
+    lines = ex['code'].split('\n')
+    matching_lines = [i for i, line in enumerate(lines) if re.search(fr"{name}\(", line)]
+    max_new_tokens = 50
+    for i in matching_lines:
+        # print(name, bad_name, numerical_name, "\n\n")
+        acc_dict['all']+=1
+        prompt = ex['prompt']+"\n"+ "\n".join(ex['code'].split('\n')[:i])+"\n<FILL_ME>"
+        if i+1 < len(lines):
+            prompt += "\n"+"\n".join(ex['code'].split('\n')[i+1:])
+        real = ex['code'].split('\n')[i]
+        filling = generate(prompt)
+        if name+"(" in filling:
+            acc_dict['Original']+=1
+        df.loc[len(df)] = {'name_type':'Original', 'prompt':prompt, 'real': real, 'generated':filling, 'answer': (name+"(" in filling)} 
+
+        
+        prompt = ex['bad_prompt']+"\n"+ "\n".join(ex['bad_code'].split('\n')[:i])+"\n<FILL_ME>"
+        if i+1 < len(lines):
+            prompt += "\n"+"\n".join(ex['bad_code'].split('\n')[i+1:])
+        real = ex['bad_code'].split('\n')[i]
+        filling = generate(prompt)
+        if bad_name+"(" in filling:
+            acc_dict['GPT generated']+=1
+        df.loc[len(df)] = {'name_type':'GPT generated', 'prompt':prompt, 'real': real, 'generated':filling, 'answer': (bad_name+"(" in filling)}
+
+        
+        prompt = ex['numerical_prompt']+"\n"+ "\n".join(ex['numerical_code'].split('\n')[:i])+"\n<FILL_ME>"
+        if i+1 < len(lines):
+            prompt += "\n"+"\n".join(ex['numerical_code'].split('\n')[i+1:])
+        real = ex['numerical_code'].split('\n')[i]
+        filling = generate(prompt, max_new_tokens)
+        if numerical_name+"(" in filling:
+            acc_dict['Numerical']+=1
+        df.loc[len(df)] = {'name_type':'Numerical', 'prompt':prompt, 'real': real, 'generated':filling, 'answer': (numerical_name+"(" in filling)}
+
+        df.to_csv(f'/home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
+
+for j in tqdm(range(4,7)):  #code_data.shape[0])):
     ex = code_data.loc[j]
     prompt_names_dict = json.loads(ex['prompt_names_dict'])
     prompt_numerical_dict = json.loads(ex['prompt_numerical_dict'])
     for name, bad_name in prompt_names_dict.items():
         numerical_name = prompt_numerical_dict[name]
-        for i in range(ex['prompt'].count(name+"(")):
-            # print(name, bad_name, numerical_name, "\n\n")
-            acc_dict['all']+=1
-
-            generate_and_save(ex['prompt'], ex['code'], name, 'Original')
-            
-            generate_and_save(ex['bad_prompt'], ex['bad_code'], bad_name, 'GPT generated')
-
-            generate_and_save(ex['numerical_prompt'], ex['numerical_code'], numerical_name, 'Numerical')
-            
-            df.to_csv(f'/home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
+        process_row_line(ex, name, bad_name, numerical_name)
 
 logging.info(f"---------------------------\n\n")
 logging.info(f"Dataset size is: {acc_dict['all']}")
