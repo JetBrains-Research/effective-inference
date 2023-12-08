@@ -20,7 +20,7 @@ model = LlamaForCausalLM.from_pretrained("codellama/CodeLlama-7b-hf", load_in_8b
 
 code_data = pd.read_csv('/home/sasha/effective-inference/clean_naming/code_data.csv')
 
-df = pd.DataFrame(columns = ['name_type', 'prompt', 'real', 'generated', 'answer'])
+df = pd.DataFrame(columns = ['name_type', 'prompt', 'function_name', 'real', 'generated', 'answer'])
 st = time.time()
 acc_dict = {'all': 0, 'Original':0, 'GPT generated':0, 'Numerical': 0}
 
@@ -44,7 +44,7 @@ def process_row_next_token(ex, name, bad_name, numerical_name):
             filling = generate(prompt)
             if filling[:len(name)] == name:
                 acc_dict['Original']+=1
-            df.loc[len(df)] = {'name_type':'Original', 'prompt':prompt, 'real': real, 'generated':filling, 'answer': filling[:len(name)] == name} 
+            df.loc[len(df)] = {'name_type':'Original', 'prompt':prompt, 'function_name':name, 'real': real, 'generated':filling, 'answer': filling[:len(name)] == name} 
 
 
             prompt = ex['bad_prompt'] + "\n" + (bad_name+"(").join(ex['bad_code'].split(bad_name+"(")[:i-1]) + "<FILL_ME>" 
@@ -52,7 +52,7 @@ def process_row_next_token(ex, name, bad_name, numerical_name):
             filling = generate(prompt)
             if filling[:len(bad_name)] == bad_name:
                 acc_dict['GPT generated']+=1
-            df.loc[len(df)] = {'name_type':'GPT generated', 'prompt':prompt, 'real': real, 'generated':filling, 'answer': filling[:len(bad_name)] == bad_name} 
+            df.loc[len(df)] = {'name_type':'GPT generated', 'prompt':prompt, 'function_name':bad_name, 'real': real, 'generated':filling, 'answer': filling[:len(bad_name)] == bad_name} 
 
         
             prompt = ex['numerical_prompt']+ "\n" + (numerical_name+"(").join(ex['numerical_code'].split(numerical_name+"(")[:i-1]) + "<FILL_ME>"
@@ -60,7 +60,7 @@ def process_row_next_token(ex, name, bad_name, numerical_name):
             filling = generate(prompt)
             if filling[:len(numerical_name)] == numerical_name:
                 acc_dict['Numerical']+=1
-            df.loc[len(df)] = {'name_type':'Numerical', 'prompt':prompt, 'real': real, 'generated':filling, 'answer': filling[:len(numerical_name)] == numerical_name} 
+            df.loc[len(df)] = {'name_type':'Numerical', 'prompt':prompt, 'function_name':numerical_name, 'real': real, 'generated':filling, 'answer': filling[:len(numerical_name)] == numerical_name} 
             
             df.to_csv(f'/home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
         
@@ -79,7 +79,7 @@ def process_row_line(ex, name, bad_name, numerical_name):
         filling = generate(prompt)
         if name+"(" in filling:
             acc_dict['Original']+=1
-        df.loc[len(df)] = {'name_type':'Original', 'prompt':prompt, 'real': real, 'generated':filling, 'answer': (name+"(" in filling)} 
+        df.loc[len(df)] = {'name_type':'Original', 'prompt':prompt, 'function_name':name,'real': real, 'generated':filling, 'answer': (name+"(" in filling)} 
 
         
         prompt = ex['bad_prompt']+"\n"+ "\n".join(ex['bad_code'].split('\n')[:i])+"\n<FILL_ME>"
@@ -89,7 +89,7 @@ def process_row_line(ex, name, bad_name, numerical_name):
         filling = generate(prompt)
         if bad_name+"(" in filling:
             acc_dict['GPT generated']+=1
-        df.loc[len(df)] = {'name_type':'GPT generated', 'prompt':prompt, 'real': real, 'generated':filling, 'answer': (bad_name+"(" in filling)}
+        df.loc[len(df)] = {'name_type':'GPT generated', 'prompt':prompt,'function_name':bad_name, 'real': real, 'generated':filling, 'answer': (bad_name+"(" in filling)}
 
         
         prompt = ex['numerical_prompt']+"\n"+ "\n".join(ex['numerical_code'].split('\n')[:i])+"\n<FILL_ME>"
@@ -99,7 +99,7 @@ def process_row_line(ex, name, bad_name, numerical_name):
         filling = generate(prompt, max_new_tokens)
         if numerical_name+"(" in filling:
             acc_dict['Numerical']+=1
-        df.loc[len(df)] = {'name_type':'Numerical', 'prompt':prompt, 'real': real, 'generated':filling, 'answer': (numerical_name+"(" in filling)}
+        df.loc[len(df)] = {'name_type':'Numerical', 'prompt':prompt, 'function_name':numerical_name,'real': real, 'generated':filling, 'answer': (numerical_name+"(" in filling)}
 
         df.to_csv(f'/home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
 
@@ -116,10 +116,22 @@ logging.info(f"Dataset size is: {acc_dict['all']}")
 print(acc_dict)
 print(f"Original functions: {acc_dict['Original']/acc_dict['all']}")
 logging.info(f"Original functions: {acc_dict['Original']/acc_dict['all']}")
+
+
 print(f"GPT generated functions: {acc_dict['GPT generated']/acc_dict['all']}")
 logging.info(f"GPT generated functions: {acc_dict['GPT generated']/acc_dict['all']}")
+
+
 print(f"Numerical functions: {acc_dict['Numerical']/acc_dict['all']}")
 logging.info(f"Numerical functions: {acc_dict['Numerical']/acc_dict['all']}")
+
+logging.info(f"Mean len of original functions: {df[df['name_type']=='Original']['function_name'].apply(len).mean()}")
+logging.info(f"Mean len of GPT generated functions: {df[df['name_type']=='GPT generated']['function_name'].apply(len).mean()}")
+logging.info(f"Mean len of Numerical functions: {df[df['name_type']=='Numerical']['function_name'].apply(len).mean()}")
+
+print(f"Mean len of original functions: {df[df['name_type']=='Original']['function_name'].apply(len).mean()}")
+print(f"Mean len of GPT generated functions: {df[df['name_type']=='GPT generated']['function_name'].apply(len).mean()}")
+print(f"Mean len of Numerical functions: {df[df['name_type']=='Numerical']['function_name'].apply(len).mean()}")
 
 # Remember to close the file handler to release the resources
 logging.shutdown()
