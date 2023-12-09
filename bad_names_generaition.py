@@ -102,14 +102,19 @@ def process_row_line(ex, name, bad_name, numerical_name):
         df.loc[len(df)] = {'name_type':'Numerical', 'prompt':prompt, 'function_name':numerical_name,'real': real, 'generated':filling, 'answer': (numerical_name+"(" in filling)}
 
         df.to_csv(f'/home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
+    
 
-for j in tqdm(range(4,7)):  #code_data.shape[0])):
+
+for j in tqdm(range(code_data.shape[0])):
     ex = code_data.loc[j]
     prompt_names_dict = json.loads(ex['prompt_names_dict'])
     prompt_numerical_dict = json.loads(ex['prompt_numerical_dict'])
     for name, bad_name in prompt_names_dict.items():
         numerical_name = prompt_numerical_dict[name]
         process_row_line(ex, name, bad_name, numerical_name)
+    
+    if j%50==0:
+            print(f"iteration {j} results: {acc_dict}")
 
 logging.info(f"---------------------------\n\n")
 logging.info(f"Dataset size is: {acc_dict['all']}")
