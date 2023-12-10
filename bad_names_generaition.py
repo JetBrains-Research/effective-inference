@@ -34,7 +34,7 @@ def generate(PROMPT, max_new_tokens = 10):
     # logging
     
 
-def process_row_next_token(ex, name, bad_name, numerical_name):
+def process_row_next_token(ex, name, bad_name, numerical_name, translit_name):
     for i in range(ex['prompt'].count(name+"(")):
             # print(name, bad_name, numerical_name, "\n\n")
             acc_dict['all']+=1
@@ -61,11 +61,19 @@ def process_row_next_token(ex, name, bad_name, numerical_name):
             if filling[:len(numerical_name)] == numerical_name:
                 acc_dict['Numerical']+=1
             df.loc[len(df)] = {'name_type':'Numerical', 'prompt':prompt, 'function_name':numerical_name, 'real': real, 'generated':filling, 'answer': filling[:len(numerical_name)] == numerical_name} 
+
+            prompt = ex['translit_prompt']+ "\n" + (translit_name+"(").join(ex['translit_code'].split(translit_name+"(")[:i-1]) + "<FILL_ME>"
+            real = (translit_name+"(")+(translit_name+"(").join(ex['translit_code'].split(translit_name+"(")[i-1:])
+            filling = generate(prompt)
+            if filling[:len(translit_name)] == translit_name:
+                acc_dict['Translit']+=1
+            df.loc[len(df)] = {'name_type':'Translit', 'prompt':prompt, 'function_name':translit_name, 'real': real, 'generated':filling, 'answer': filling[:len(translit_name)] == translit_name} 
+
             
             df.to_csv(f'/home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
         
 
-def process_row_line(ex, name, bad_name, numerical_name):
+def process_row_line(ex, name, bad_name, numerical_name, translit_name):
     lines = ex['code'].split('\n')
     matching_lines = [i for i, line in enumerate(lines) if re.search(fr"{name}\(", line)]
     max_new_tokens = 50
@@ -101,6 +109,15 @@ def process_row_line(ex, name, bad_name, numerical_name):
             acc_dict['Numerical']+=1
         df.loc[len(df)] = {'name_type':'Numerical', 'prompt':prompt, 'function_name':numerical_name,'real': real, 'generated':filling, 'answer': (numerical_name+"(" in filling)}
 
+        prompt = ex['translit_prompt']+"\n"+ "\n".join(ex['translit_code'].split('\n')[:i])+"\n<FILL_ME>"
+        if i+1 < len(lines):
+            prompt += "\n"+"\n".join(ex['translit_code'].split('\n')[i+1:])
+        real = ex['translit_code'].split('\n')[i]
+        filling = generate(prompt, max_new_tokens)
+        if translit_name+"(" in filling:
+            acc_dict['Translit']+=1
+        df.loc[len(df)] = {'name_type':'Translit', 'prompt':prompt, 'function_name':translit_name,'real': real, 'generated':filling, 'answer': (translit_name+"(" in filling)}
+
         df.to_csv(f'/home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
     
 
@@ -111,7 +128,8 @@ for j in tqdm(range(code_data.shape[0])):
     prompt_numerical_dict = json.loads(ex['prompt_numerical_dict'])
     for name, bad_name in prompt_names_dict.items():
         numerical_name = prompt_numerical_dict[name]
-        process_row_line(ex, name, bad_name, numerical_name)
+        translit_name = translit_names_dict[name]
+        process_row_line(ex, name, bad_name, numerical_name, translit_name)
     
     if j%50==0:
             print(f"iteration {j} results: {acc_dict}")
@@ -130,13 +148,18 @@ logging.info(f"GPT generated functions: {acc_dict['GPT generated']/acc_dict['all
 print(f"Numerical functions: {acc_dict['Numerical']/acc_dict['all']}")
 logging.info(f"Numerical functions: {acc_dict['Numerical']/acc_dict['all']}")
 
+print(f"Translit functions: {acc_dict['Translit']/acc_dict['all']}")
+logging.info(f"Translit functions: {acc_dict['Translit']/acc_dict['all']}")
+
 logging.info(f"Mean len of original functions: {df[df['name_type']=='Original']['function_name'].apply(len).mean()}")
 logging.info(f"Mean len of GPT generated functions: {df[df['name_type']=='GPT generated']['function_name'].apply(len).mean()}")
 logging.info(f"Mean len of Numerical functions: {df[df['name_type']=='Numerical']['function_name'].apply(len).mean()}")
+logging.info(f"Mean len of Translit functions: {df[df['name_type']=='Translit']['function_name'].apply(len).mean()}")
 
 print(f"Mean len of original functions: {df[df['name_type']=='Original']['function_name'].apply(len).mean()}")
 print(f"Mean len of GPT generated functions: {df[df['name_type']=='GPT generated']['function_name'].apply(len).mean()}")
 print(f"Mean len of Numerical functions: {df[df['name_type']=='Numerical']['function_name'].apply(len).mean()}")
+print(f"Mean len of Translit functions: {df[df['name_type']=='Translit']['function_name'].apply(len).mean()}")
 
 # Remember to close the file handler to release the resources
 logging.shutdown()
