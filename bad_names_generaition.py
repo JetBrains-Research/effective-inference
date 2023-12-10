@@ -18,11 +18,12 @@ tokenizer = CodeLlamaTokenizer.from_pretrained("codellama/CodeLlama-7b-hf")
 model = LlamaForCausalLM.from_pretrained("codellama/CodeLlama-7b-hf", load_in_8bit=True,
     device_map="auto")
 
-code_data = pd.read_csv('/home/sasha/effective-inference/clean_naming/code_data.csv')
+code_data = pd.read_csv('/home/sasha/effective-inference/clean_naming/code_data.csv', index_col=0)
+print(code_data.loc[0])
 
 df = pd.DataFrame(columns = ['name_type', 'prompt', 'function_name', 'real', 'generated', 'answer'])
 st = time.time()
-acc_dict = {'all': 0, 'Original':0, 'GPT generated':0, 'Numerical': 0}
+acc_dict = {'all': 0, 'Original':0, 'GPT generated':0, 'Numerical': 0, 'Translit': 0}
 
 def generate(PROMPT, max_new_tokens = 10):
     # generation
@@ -76,7 +77,7 @@ def process_row_next_token(ex, name, bad_name, numerical_name, translit_name):
 def process_row_line(ex, name, bad_name, numerical_name, translit_name):
     lines = ex['code'].split('\n')
     matching_lines = [i for i, line in enumerate(lines) if re.search(fr"{name}\(", line)]
-    max_new_tokens = 50
+    max_new_tokens = 20
     for i in matching_lines:
         # print(name, bad_name, numerical_name, "\n\n")
         acc_dict['all']+=1
@@ -84,7 +85,7 @@ def process_row_line(ex, name, bad_name, numerical_name, translit_name):
         if i+1 < len(lines):
             prompt += "\n"+"\n".join(ex['code'].split('\n')[i+1:])
         real = ex['code'].split('\n')[i]
-        filling = generate(prompt)
+        filling = generate(prompt, max_new_tokens).split('\n')[0]
         if name+"(" in filling:
             acc_dict['Original']+=1
         df.loc[len(df)] = {'name_type':'Original', 'prompt':prompt, 'function_name':name,'real': real, 'generated':filling, 'answer': (name+"(" in filling)} 
@@ -94,7 +95,7 @@ def process_row_line(ex, name, bad_name, numerical_name, translit_name):
         if i+1 < len(lines):
             prompt += "\n"+"\n".join(ex['bad_code'].split('\n')[i+1:])
         real = ex['bad_code'].split('\n')[i]
-        filling = generate(prompt)
+        filling = generate(prompt, max_new_tokens).split('\n')[0]
         if bad_name+"(" in filling:
             acc_dict['GPT generated']+=1
         df.loc[len(df)] = {'name_type':'GPT generated', 'prompt':prompt,'function_name':bad_name, 'real': real, 'generated':filling, 'answer': (bad_name+"(" in filling)}
@@ -104,7 +105,7 @@ def process_row_line(ex, name, bad_name, numerical_name, translit_name):
         if i+1 < len(lines):
             prompt += "\n"+"\n".join(ex['numerical_code'].split('\n')[i+1:])
         real = ex['numerical_code'].split('\n')[i]
-        filling = generate(prompt, max_new_tokens)
+        filling = generate(prompt, max_new_tokens).split('\n')[0]
         if numerical_name+"(" in filling:
             acc_dict['Numerical']+=1
         df.loc[len(df)] = {'name_type':'Numerical', 'prompt':prompt, 'function_name':numerical_name,'real': real, 'generated':filling, 'answer': (numerical_name+"(" in filling)}
@@ -113,7 +114,7 @@ def process_row_line(ex, name, bad_name, numerical_name, translit_name):
         if i+1 < len(lines):
             prompt += "\n"+"\n".join(ex['translit_code'].split('\n')[i+1:])
         real = ex['translit_code'].split('\n')[i]
-        filling = generate(prompt, max_new_tokens)
+        filling = generate(prompt, max_new_tokens).split('\n')[0]
         if translit_name+"(" in filling:
             acc_dict['Translit']+=1
         df.loc[len(df)] = {'name_type':'Translit', 'prompt':prompt, 'function_name':translit_name,'real': real, 'generated':filling, 'answer': (translit_name+"(" in filling)}
@@ -122,10 +123,11 @@ def process_row_line(ex, name, bad_name, numerical_name, translit_name):
     
 
 
-for j in tqdm(range(code_data.shape[0])):
+for j in tqdm(range(5)):#code_data.shape[0])):
     ex = code_data.loc[j]
     prompt_names_dict = json.loads(ex['prompt_names_dict'])
     prompt_numerical_dict = json.loads(ex['prompt_numerical_dict'])
+    translit_names_dict = json.loads(ex['translit_names_dict'])
     for name, bad_name in prompt_names_dict.items():
         numerical_name = prompt_numerical_dict[name]
         translit_name = translit_names_dict[name]
