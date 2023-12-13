@@ -13,6 +13,7 @@ warnings.filterwarnings("ignore")
 logging.basicConfig(filename='/home/sasha/effective-inference/clean_naming/logs/accurasies.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
+
 tokenizer = CodeLlamaTokenizer.from_pretrained("codellama/CodeLlama-7b-hf")
 model = LlamaForCausalLM.from_pretrained("codellama/CodeLlama-7b-hf", load_in_8bit=True,
     device_map="auto")

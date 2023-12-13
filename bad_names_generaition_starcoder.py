@@ -1,4 +1,3 @@
-from transformers import LlamaForCausalLM, CodeLlamaTokenizer
 import pandas as pd
 from tqdm import tqdm
 import logging
@@ -6,6 +5,16 @@ import json
 import warnings
 import re
 import time
+from huggingface_hub import login
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+# Read Hugging Face API token from file
+with open('/home/sasha/effective-inference/hf_token.txt', 'r') as file:
+    api_token = file.read().strip()
+
+# Initialize the HfApi object with the read token
+login(token = api_token)
+
 warnings.filterwarnings("ignore")
 
 
@@ -13,9 +22,16 @@ warnings.filterwarnings("ignore")
 logging.basicConfig(filename='/home/sasha/effective-inference/clean_naming/logs/accurasies.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-tokenizer = CodeLlamaTokenizer.from_pretrained("codellama/CodeLlama-7b-hf")
-model = LlamaForCausalLM.from_pretrained("codellama/CodeLlama-7b-hf", load_in_8bit=True,
+tokenizer = AutoTokenizer.from_pretrained("bigcode/starcoderbase-7b")
+model = AutoModelForCausalLM.from_pretrained("bigcode/starcoderbase-7b", load_in_8bit=True,
     device_map="auto")
+
+
+# input_text = "<fim_prefix>def print_hello_world():\n    <fim_suffix>\n    print('Hello world!')<fim_middle>"
+# print(input_text)
+# inputs = tokenizer.encode(input_text, return_tensors="pt").to("cuda")
+# outputs = model.generate(inputs, max_new_tokens = 10)
+# print(tokenizer.decode(outputs[0]))
 
 code_data = pd.read_csv('/home/sasha/effective-inference/clean_naming/code_data.csv', index_col=0)
 print(code_data.loc[0])
@@ -39,32 +55,32 @@ def process_row_next_token(ex, name, bad_name, numerical_name, translit_name):
             # print(name, bad_name, numerical_name, "\n\n")
             acc_dict['all']+=1
 
-            prompt = ex['prompt'] + "\n" + (name+"(").join(ex['code'].split(name+"(")[:i-1]) + "<FILL_ME>"
+            prompt = ex['prompt'] + "\n" + (name+"(").join(ex['code'].split(name+"(")[:i-1])
             real = (name+"(")+(name+"(").join(ex['code'].split(name+"(")[i-1:])
-            filling = generate(prompt)
+            filling = generate(prompt).strip()
             if filling[:len(name)] == name:
                 acc_dict['Original']+=1
             df.loc[len(df)] = {'name_type':'Original', 'prompt':prompt, 'function_name':name, 'real': real, 'generated':filling, 'answer': filling[:len(name)] == name} 
 
 
-            prompt = ex['bad_prompt'] + "\n" + (bad_name+"(").join(ex['bad_code'].split(bad_name+"(")[:i-1]) + "<FILL_ME>" 
+            prompt = ex['bad_prompt'] + "\n" + (bad_name+"(").join(ex['bad_code'].split(bad_name+"(")[:i-1]) 
             real = (bad_name+"(")+(bad_name+"(").join(ex['bad_code'].split(bad_name+"(")[i-1:])
-            filling = generate(prompt)
+            filling = generate(prompt).strip()
             if filling[:len(bad_name)] == bad_name:
                 acc_dict['GPT generated']+=1
             df.loc[len(df)] = {'name_type':'GPT generated', 'prompt':prompt, 'function_name':bad_name, 'real': real, 'generated':filling, 'answer': filling[:len(bad_name)] == bad_name} 
 
         
-            prompt = ex['numerical_prompt']+ "\n" + (numerical_name+"(").join(ex['numerical_code'].split(numerical_name+"(")[:i-1]) + "<FILL_ME>"
+            prompt = ex['numerical_prompt']+ "\n" + (numerical_name+"(").join(ex['numerical_code'].split(numerical_name+"(")[:i-1]) 
             real = (numerical_name+"(")+(numerical_name+"(").join(ex['numerical_code'].split(numerical_name+"(")[i-1:])
-            filling = generate(prompt)
+            filling = generate(prompt).strip()
             if filling[:len(numerical_name)] == numerical_name:
                 acc_dict['Numerical']+=1
             df.loc[len(df)] = {'name_type':'Numerical', 'prompt':prompt, 'function_name':numerical_name, 'real': real, 'generated':filling, 'answer': filling[:len(numerical_name)] == numerical_name} 
 
-            prompt = ex['translit_prompt']+ "\n" + (translit_name+"(").join(ex['translit_code'].split(translit_name+"(")[:i-1]) + "<FILL_ME>"
+            prompt = ex['translit_prompt']+ "\n" + (translit_name+"(").join(ex['translit_code'].split(translit_name+"(")[:i-1])
             real = (translit_name+"(")+(translit_name+"(").join(ex['translit_code'].split(translit_name+"(")[i-1:])
-            filling = generate(prompt)
+            filling = generate(prompt).strip()
             if filling[:len(translit_name)] == translit_name:
                 acc_dict['Translit']+=1
             df.loc[len(df)] = {'name_type':'Translit', 'prompt':prompt, 'function_name':translit_name, 'real': real, 'generated':filling, 'answer': filling[:len(translit_name)] == translit_name} 
@@ -80,40 +96,46 @@ def process_row_line(ex, name, bad_name, numerical_name, translit_name):
     for i in matching_lines:
         # print(name, bad_name, numerical_name, "\n\n")
         acc_dict['all']+=1
-        prompt = ex['prompt']+"\n"+ "\n".join(ex['code'].split('\n')[:i])+"\n<FILL_ME>"
+        
+        prompt = "<fim_prefix>"+ex['prompt']+"\n"+ "\n".join(ex['code'].split('\n')[:i])+"\n<fim_suffix>"
         if i+1 < len(lines):
             prompt += "\n"+"\n".join(ex['code'].split('\n')[i+1:])
+        prompt+="<fim_middle>"
         real = ex['code'].split('\n')[i]
-        filling = generate(prompt, max_new_tokens).split('\n')[0]
+        filling = generate(prompt, max_new_tokens).split("<fim_middle>")[-1].split('\n')[0]
+        print(filling)
         if name+"(" in filling:
             acc_dict['Original']+=1
         df.loc[len(df)] = {'name_type':'Original', 'prompt':prompt, 'function_name':name,'real': real, 'generated':filling, 'answer': (name+"(" in filling)} 
 
         
-        prompt = ex['bad_prompt']+"\n"+ "\n".join(ex['bad_code'].split('\n')[:i])+"\n<FILL_ME>"
+        prompt = "<fim_prefix>"+ex['bad_prompt']+"\n"+ "\n".join(ex['bad_code'].split('\n')[:i])+"\n<fim_suffix>"
         if i+1 < len(lines):
             prompt += "\n"+"\n".join(ex['bad_code'].split('\n')[i+1:])
+        prompt+="<fim_middle>"
         real = ex['bad_code'].split('\n')[i]
-        filling = generate(prompt, max_new_tokens).split('\n')[0]
+        filling = generate(prompt, max_new_tokens).split("<fim_middle>")[-1].split('\n')[0]
         if bad_name+"(" in filling:
             acc_dict['GPT generated']+=1
         df.loc[len(df)] = {'name_type':'GPT generated', 'prompt':prompt,'function_name':bad_name, 'real': real, 'generated':filling, 'answer': (bad_name+"(" in filling)}
 
         
-        prompt = ex['numerical_prompt']+"\n"+ "\n".join(ex['numerical_code'].split('\n')[:i])+"\n<FILL_ME>"
+        prompt = "<fim_prefix>"+ex['numerical_prompt']+"\n"+ "\n".join(ex['numerical_code'].split('\n')[:i])+"\n<fim_suffix>"
         if i+1 < len(lines):
             prompt += "\n"+"\n".join(ex['numerical_code'].split('\n')[i+1:])
+        prompt+="<fim_middle>"
         real = ex['numerical_code'].split('\n')[i]
-        filling = generate(prompt, max_new_tokens).split('\n')[0]
+        filling = generate(prompt, max_new_tokens).split("<fim_middle>")[-1].split('\n')[0]
         if numerical_name+"(" in filling:
             acc_dict['Numerical']+=1
         df.loc[len(df)] = {'name_type':'Numerical', 'prompt':prompt, 'function_name':numerical_name,'real': real, 'generated':filling, 'answer': (numerical_name+"(" in filling)}
 
-        prompt = ex['translit_prompt']+"\n"+ "\n".join(ex['translit_code'].split('\n')[:i])+"\n<FILL_ME>"
+        prompt = "<fim_prefix>"+ex['translit_prompt']+"\n"+ "\n".join(ex['translit_code'].split('\n')[:i])+"\n<fim_suffix>"
         if i+1 < len(lines):
             prompt += "\n"+"\n".join(ex['translit_code'].split('\n')[i+1:])
+        prompt+="<fim_middle>"
         real = ex['translit_code'].split('\n')[i]
-        filling = generate(prompt, max_new_tokens).split('\n')[0]
+        filling = generate(prompt, max_new_tokens).split("<fim_middle>")[-1].split('\n')[0]
         if translit_name+"(" in filling:
             acc_dict['Translit']+=1
         df.loc[len(df)] = {'name_type':'Translit', 'prompt':prompt, 'function_name':translit_name,'real': real, 'generated':filling, 'answer': (translit_name+"(" in filling)}
@@ -137,31 +159,32 @@ for j in tqdm(range(code_data.shape[0])):
             print(f"iteration {j} results: {acc_dict}")
 
 logging.info(f"---------------------------\n\n")
+logging.info(f'Generation with starcoder')
 logging.info(f'Generation info saved to file /home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
 logging.info(f"Dataset size is: {acc_dict['all']}")
 print(acc_dict)
-# print(f"Original functions: {acc_dict['Original']/acc_dict['all']}")
-# logging.info(f"Original functions: {acc_dict['Original']/acc_dict['all']}")
+print(f"Original functions: {acc_dict['Original']/acc_dict['all']}")
+logging.info(f"Original functions: {acc_dict['Original']/acc_dict['all']}")
 
 
-# print(f"GPT generated functions: {acc_dict['GPT generated']/acc_dict['all']}")
-# logging.info(f"GPT generated functions: {acc_dict['GPT generated']/acc_dict['all']}")
+print(f"GPT generated functions: {acc_dict['GPT generated']/acc_dict['all']}")
+logging.info(f"GPT generated functions: {acc_dict['GPT generated']/acc_dict['all']}")
 
 
-# print(f"Numerical functions: {acc_dict['Numerical']/acc_dict['all']}")
-# logging.info(f"Numerical functions: {acc_dict['Numerical']/acc_dict['all']}")
+print(f"Numerical functions: {acc_dict['Numerical']/acc_dict['all']}")
+logging.info(f"Numerical functions: {acc_dict['Numerical']/acc_dict['all']}")
 
 print(f"Translit functions: {acc_dict['Translit']/acc_dict['all']}")
 logging.info(f"Translit functions: {acc_dict['Translit']/acc_dict['all']}")
 
-# logging.info(f"Mean len of original functions: {df[df['name_type']=='Original']['function_name'].apply(len).mean()}")
-# logging.info(f"Mean len of GPT generated functions: {df[df['name_type']=='GPT generated']['function_name'].apply(len).mean()}")
-# logging.info(f"Mean len of Numerical functions: {df[df['name_type']=='Numerical']['function_name'].apply(len).mean()}")
+logging.info(f"Mean len of original functions: {df[df['name_type']=='Original']['function_name'].apply(len).mean()}")
+logging.info(f"Mean len of GPT generated functions: {df[df['name_type']=='GPT generated']['function_name'].apply(len).mean()}")
+logging.info(f"Mean len of Numerical functions: {df[df['name_type']=='Numerical']['function_name'].apply(len).mean()}")
 logging.info(f"Mean len of Translit functions: {df[df['name_type']=='Translit']['function_name'].apply(len).mean()}")
 
-# print(f"Mean len of original functions: {df[df['name_type']=='Original']['function_name'].apply(len).mean()}")
-# print(f"Mean len of GPT generated functions: {df[df['name_type']=='GPT generated']['function_name'].apply(len).mean()}")
-# print(f"Mean len of Numerical functions: {df[df['name_type']=='Numerical']['function_name'].apply(len).mean()}")
+print(f"Mean len of original functions: {df[df['name_type']=='Original']['function_name'].apply(len).mean()}")
+print(f"Mean len of GPT generated functions: {df[df['name_type']=='GPT generated']['function_name'].apply(len).mean()}")
+print(f"Mean len of Numerical functions: {df[df['name_type']=='Numerical']['function_name'].apply(len).mean()}")
 print(f"Mean len of Translit functions: {df[df['name_type']=='Translit']['function_name'].apply(len).mean()}")
 
 # Remember to close the file handler to release the resources
