@@ -152,8 +152,8 @@ for j in tqdm(range(code_data.shape[0])):
     for name, bad_name in prompt_names_dict.items():
         numerical_name = prompt_numerical_dict[name]
         translit_name = translit_names_dict[name]
-        process_row_next_token(ex, name, bad_name, numerical_name, translit_name)
-        # process_row_line(ex, name, bad_name, numerical_name, translit_name)
+        # process_row_next_token(ex, name, bad_name, numerical_name, translit_name)
+        process_row_line(ex, name, bad_name, numerical_name, translit_name)
     
     if j%50==0:
             print(f"iteration {j} results: {acc_dict}")

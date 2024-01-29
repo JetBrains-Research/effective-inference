@@ -1,170 +1,152 @@
-from transformers import LlamaForCausalLM, CodeLlamaTokenizer
+from transformers import LlamaForCausalLM, CodeLlamaTokenizer, StoppingCriteria, StoppingCriteriaList
 import pandas as pd
 from tqdm import tqdm
 import logging
 import json
 import warnings
 import re
+import torch
 import time
-warnings.filterwarnings("ignore")
 
+LOG_FILE = '/home/sasha/effective-inference/clean_naming/logs/accurasies.log'
+CODE_DATA_PATH = '/home/sasha/effective-inference/clean_naming/code_data.csv'
+MODEL_NAME = "codellama/CodeLlama-7b-hf"
+GENERATION_DATA_PREFIX = '/home/sasha/effective-inference/clean_naming/logs/generation_data_'
 
-
-logging.basicConfig(filename='/home/sasha/effective-inference/clean_naming/logs/accurasies.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-
-
-tokenizer = CodeLlamaTokenizer.from_pretrained("codellama/CodeLlama-7b-hf")
-model = LlamaForCausalLM.from_pretrained("codellama/CodeLlama-7b-hf", load_in_8bit=True,
-    device_map="auto")
-
-code_data = pd.read_csv('/home/sasha/effective-inference/clean_naming/code_data.csv', index_col=0)
-print(code_data.loc[0])
-
-df = pd.DataFrame(columns = ['name_type', 'prompt', 'function_name', 'real', 'generated', 'answer'])
+df = pd.DataFrame(
+        columns=['name_type', 'prompt', 'function_name', 'real', 'generated', 'answer', 'scores', 'ids',
+                 'tokenized_name'])
 st = time.time()
-acc_dict = {'all': 0, 'Original':0, 'GPT generated':0, 'Numerical': 0, 'Translit': 0}
 
-def generate(PROMPT, max_new_tokens = 10):
+
+# Logger setup
+def setup_logging():
+    logging.basicConfig(filename=LOG_FILE, level=logging.INFO,
+                        format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Model and Tokenizer setup
+def setup_model_and_tokenizer():
+    tokenizer = CodeLlamaTokenizer.from_pretrained(MODEL_NAME)
+    model = LlamaForCausalLM.from_pretrained(MODEL_NAME, load_in_8bit=True, device_map="auto")
+    return model, tokenizer
+
+
+class StoppingCriteriaSub(StoppingCriteria):
+    def __init__(self, tokenizer, stops=[]):
+        super().__init__()
+        self.stops = [stop.to("cuda") for stop in stops]
+        self.tokenizer = tokenizer
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor):
+        last_token = input_ids[0][-1]
+        for stop in self.stops:
+            if len(scores) > 1 and self.tokenizer.decode(stop) == self.tokenizer.decode(last_token):
+                return True
+        return False
+
+def generate(prompt, model, tokenizer, stopping_criteria, max_new_tokens=30):
     # generation
-    input_ids = tokenizer(PROMPT, return_tensors="pt")["input_ids"].to('cuda')
-    generated_ids = model.generate(input_ids, max_new_tokens=max_new_tokens)
-    filling = tokenizer.batch_decode(generated_ids[:, input_ids.shape[1]:], skip_special_tokens = True)[0]
+    model.config.forced_eos_token_id = [13]
+    input_ids = tokenizer(prompt, return_tensors="pt")["input_ids"].to('cuda')
+    labels = torch.tensor([1]).unsqueeze(0)
+    generated_ids = model.generate(input_ids, max_new_tokens=max_new_tokens, labels=labels,
+                                   return_dict_in_generate=True, output_scores=True,
+                                   stopping_criteria=stopping_criteria)
 
-    return filling
-    # logging
-    
+    filling = tokenizer.batch_decode(generated_ids.sequences[:, input_ids.shape[1]:], skip_special_tokens=True)[0]
 
-def process_row_next_token(ex, name, bad_name, numerical_name, translit_name):
-    for i in range(ex['prompt'].count(name+"(")):
-            # print(name, bad_name, numerical_name, "\n\n")
-            acc_dict['all']+=1
-
-            prompt = ex['prompt'] + "\n" + (name+"(").join(ex['code'].split(name+"(")[:i-1]) + "<FILL_ME>"
-            real = (name+"(")+(name+"(").join(ex['code'].split(name+"(")[i-1:])
-            filling = generate(prompt)
-            if filling[:len(name)] == name:
-                acc_dict['Original']+=1
-            df.loc[len(df)] = {'name_type':'Original', 'prompt':prompt, 'function_name':name, 'real': real, 'generated':filling, 'answer': filling[:len(name)] == name} 
+    return filling, [float(generated_ids['scores'][e][0][i].detach().cpu()) for e, i in
+                     enumerate(generated_ids['sequences'][0][-len(generated_ids['scores']):])], \
+        generated_ids['sequences'][0][-len(generated_ids['scores']):].tolist()
 
 
-            prompt = ex['bad_prompt'] + "\n" + (bad_name+"(").join(ex['bad_code'].split(bad_name+"(")[:i-1]) + "<FILL_ME>" 
-            real = (bad_name+"(")+(bad_name+"(").join(ex['bad_code'].split(bad_name+"(")[i-1:])
-            filling = generate(prompt)
-            if filling[:len(bad_name)] == bad_name:
-                acc_dict['GPT generated']+=1
-            df.loc[len(df)] = {'name_type':'GPT generated', 'prompt':prompt, 'function_name':bad_name, 'real': real, 'generated':filling, 'answer': filling[:len(bad_name)] == bad_name} 
+def generation_step_next_token(i, p, name, code, type, model, tokenizer, stopping_criteria, fill_in_the_middle=False,  line=False):
+    split_string = '\n' if line else (name + "(")
+    prompt = p + "\n" + split_string.join(code.split(split_string)[:i - 1]) + "<FILL_ME>"
+    real = split_string + split_string.join(code.split(split_string)[i - 1:])
+    if line : prompt+= "\n"
+    if fill_in_the_middle and '\n' in real:
+        prompt += '\n' + '\n'.join(real.split("\n")[1:])
+    filling, scores, ids = generate(prompt, model, tokenizer, stopping_criteria)
+    if line:
+        answer = (name+"(") in filling
+    else:
+        answer = filling[:len(name)] == name
+    df.loc[len(df)] = {'name_type': type, 'prompt': prompt, 'function_name': name, 'real': real, 'generated': filling,
+                       'answer': answer, 'scores': scores, 'ids': ids,
+                       'tokenized_name': tokenizer(name, return_tensors="pt")["input_ids"].tolist()}
+    return int(answer)
 
-        
-            prompt = ex['numerical_prompt']+ "\n" + (numerical_name+"(").join(ex['numerical_code'].split(numerical_name+"(")[:i-1]) + "<FILL_ME>"
-            real = (numerical_name+"(")+(numerical_name+"(").join(ex['numerical_code'].split(numerical_name+"(")[i-1:])
-            filling = generate(prompt)
-            if filling[:len(numerical_name)] == numerical_name:
-                acc_dict['Numerical']+=1
-            df.loc[len(df)] = {'name_type':'Numerical', 'prompt':prompt, 'function_name':numerical_name, 'real': real, 'generated':filling, 'answer': filling[:len(numerical_name)] == numerical_name} 
 
-            prompt = ex['translit_prompt']+ "\n" + (translit_name+"(").join(ex['translit_code'].split(translit_name+"(")[:i-1]) + "<FILL_ME>"
-            real = (translit_name+"(")+(translit_name+"(").join(ex['translit_code'].split(translit_name+"(")[i-1:])
-            filling = generate(prompt)
-            if filling[:len(translit_name)] == translit_name:
-                acc_dict['Translit']+=1
-            df.loc[len(df)] = {'name_type':'Translit', 'prompt':prompt, 'function_name':translit_name, 'real': real, 'generated':filling, 'answer': filling[:len(translit_name)] == translit_name} 
+def process_row(ex, name, bad_name, numerical_name, translit_name, model, tokenizer, stopping_criteria, acc_dict, fill_in_the_middle=False, line=False):
+    if line:
+        lines = ex['code'].split('\n')
+        matching_lines = [i for i, line in enumerate(lines) if re.search(fr"{name}\(", line)]
+        n_steps = matching_lines
+    else:
+        n_steps = range(ex['prompt'].count(name + "("))
 
-            
-            df.to_csv(f'/home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
-        
-
-def process_row_line(ex, name, bad_name, numerical_name, translit_name):
-    lines = ex['code'].split('\n')
-    matching_lines = [i for i, line in enumerate(lines) if re.search(fr"{name}\(", line)]
-    max_new_tokens = 20
-    for i in matching_lines:
+    for i in n_steps:
         # print(name, bad_name, numerical_name, "\n\n")
-        acc_dict['all']+=1
-        prompt = ex['prompt']+"\n"+ "\n".join(ex['code'].split('\n')[:i])+"\n<FILL_ME>"
-        if i+1 < len(lines):
-            prompt += "\n"+"\n".join(ex['code'].split('\n')[i+1:])
-        real = ex['code'].split('\n')[i]
-        filling = generate(prompt, max_new_tokens).split('\n')[0]
-        if name+"(" in filling:
-            acc_dict['Original']+=1
-        df.loc[len(df)] = {'name_type':'Original', 'prompt':prompt, 'function_name':name,'real': real, 'generated':filling, 'answer': (name+"(" in filling)} 
+        acc_dict['all'] += 1
 
-        
-        prompt = ex['bad_prompt']+"\n"+ "\n".join(ex['bad_code'].split('\n')[:i])+"\n<FILL_ME>"
-        if i+1 < len(lines):
-            prompt += "\n"+"\n".join(ex['bad_code'].split('\n')[i+1:])
-        real = ex['bad_code'].split('\n')[i]
-        filling = generate(prompt, max_new_tokens).split('\n')[0]
-        if bad_name+"(" in filling:
-            acc_dict['GPT generated']+=1
-        df.loc[len(df)] = {'name_type':'GPT generated', 'prompt':prompt,'function_name':bad_name, 'real': real, 'generated':filling, 'answer': (bad_name+"(" in filling)}
+        acc_dict['Original'] += generation_step_next_token(i, ex['prompt'], name, ex['code'], 'Original', model, tokenizer, stopping_criteria,
+                                                           fill_in_the_middle, line)
 
-        
-        prompt = ex['numerical_prompt']+"\n"+ "\n".join(ex['numerical_code'].split('\n')[:i])+"\n<FILL_ME>"
-        if i+1 < len(lines):
-            prompt += "\n"+"\n".join(ex['numerical_code'].split('\n')[i+1:])
-        real = ex['numerical_code'].split('\n')[i]
-        filling = generate(prompt, max_new_tokens).split('\n')[0]
-        if numerical_name+"(" in filling:
-            acc_dict['Numerical']+=1
-        df.loc[len(df)] = {'name_type':'Numerical', 'prompt':prompt, 'function_name':numerical_name,'real': real, 'generated':filling, 'answer': (numerical_name+"(" in filling)}
+        acc_dict['GPT generated'] += generation_step_next_token(i, ex['bad_prompt'], bad_name, ex['bad_code'],
+                                                                'GPT generated', model, tokenizer, stopping_criteria, fill_in_the_middle, line)
 
-        prompt = ex['translit_prompt']+"\n"+ "\n".join(ex['translit_code'].split('\n')[:i])+"\n<FILL_ME>"
-        if i+1 < len(lines):
-            prompt += "\n"+"\n".join(ex['translit_code'].split('\n')[i+1:])
-        real = ex['translit_code'].split('\n')[i]
-        filling = generate(prompt, max_new_tokens).split('\n')[0]
-        if translit_name+"(" in filling:
-            acc_dict['Translit']+=1
-        df.loc[len(df)] = {'name_type':'Translit', 'prompt':prompt, 'function_name':translit_name,'real': real, 'generated':filling, 'answer': (translit_name+"(" in filling)}
+        acc_dict['Numerical'] += generation_step_next_token(i, ex['numerical_prompt'], numerical_name,
+                                                            ex['numerical_code'], 'Numerical',model, tokenizer, stopping_criteria, fill_in_the_middle, line)
+
+        acc_dict['Translit'] += generation_step_next_token(i, ex['translit_prompt'], translit_name, ex['translit_code'],
+                                                           'Translit', model, tokenizer, stopping_criteria, fill_in_the_middle, line)
 
         df.to_csv(f'/home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
-    
+        return acc_dict
 
 
-for j in tqdm(range(code_data.shape[0])):
-    ex = code_data.loc[j]
-    prompt_names_dict = json.loads(ex['prompt_names_dict'])
-    prompt_numerical_dict = json.loads(ex['prompt_numerical_dict'])
-    translit_names_dict = json.loads(ex['translit_names_dict'])
-    for name, bad_name in prompt_names_dict.items():
-        numerical_name = prompt_numerical_dict[name]
-        translit_name = translit_names_dict[name]
-        process_row_next_token(ex, name, bad_name, numerical_name, translit_name)
-        # process_row_line(ex, name, bad_name, numerical_name, translit_name)
-    
-    if j%50==0:
-            print(f"iteration {j} results: {acc_dict}")
+def main():
+    setup_logging()
+    model, tokenizer = setup_model_and_tokenizer()
 
-logging.info(f"---------------------------\n\n")
-logging.info(f'Generation info saved to file /home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
-logging.info(f"Dataset size is: {acc_dict['all']}")
-print(acc_dict)
-# print(f"Original functions: {acc_dict['Original']/acc_dict['all']}")
-# logging.info(f"Original functions: {acc_dict['Original']/acc_dict['all']}")
+    stopping_criteria = StoppingCriteriaList([StoppingCriteriaSub(tokenizer, stops=torch.tensor([13]))])
+
+    # Load data
+    code_data = pd.read_csv(CODE_DATA_PATH, index_col=0)
+    acc_dict = {'all': 0, 'Original': 0, 'GPT generated': 0, 'Numerical': 0, 'Translit': 0}
 
 
-# print(f"GPT generated functions: {acc_dict['GPT generated']/acc_dict['all']}")
-# logging.info(f"GPT generated functions: {acc_dict['GPT generated']/acc_dict['all']}")
+    logging.info(f"---------------------------\n\n")
+    for j in tqdm(range(2, 4)):  # code_data.shape[0])):
+        ex = code_data.loc[j]
+        prompt_names_dict = json.loads(ex['prompt_names_dict'])
+        prompt_numerical_dict = json.loads(ex['prompt_numerical_dict'])
+        translit_names_dict = json.loads(ex['translit_names_dict'])
 
+        for name, bad_name in prompt_names_dict.items():
+            numerical_name = prompt_numerical_dict[name]
+            translit_name = translit_names_dict[name]
+            acc_dict = process_row(ex, name, bad_name, numerical_name, translit_name, model, tokenizer, stopping_criteria, acc_dict, fill_in_the_middle=True, line=True)
 
-# print(f"Numerical functions: {acc_dict['Numerical']/acc_dict['all']}")
-# logging.info(f"Numerical functions: {acc_dict['Numerical']/acc_dict['all']}")
+    logging.info(
+        f'Generation info saved to file /home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
+    logging.info(f"Dataset size is: {acc_dict['all']}")
+    print(acc_dict)
+    print(f"Original functions: {acc_dict['Original'] / acc_dict['all']}")
+    logging.info(f"Original functions: {acc_dict['Original'] / acc_dict['all']}")
 
-print(f"Translit functions: {acc_dict['Translit']/acc_dict['all']}")
-logging.info(f"Translit functions: {acc_dict['Translit']/acc_dict['all']}")
+    print(f"GPT generated functions: {acc_dict['GPT generated'] / acc_dict['all']}")
+    logging.info(f"GPT generated functions: {acc_dict['GPT generated'] / acc_dict['all']}")
 
-# logging.info(f"Mean len of original functions: {df[df['name_type']=='Original']['function_name'].apply(len).mean()}")
-# logging.info(f"Mean len of GPT generated functions: {df[df['name_type']=='GPT generated']['function_name'].apply(len).mean()}")
-# logging.info(f"Mean len of Numerical functions: {df[df['name_type']=='Numerical']['function_name'].apply(len).mean()}")
-logging.info(f"Mean len of Translit functions: {df[df['name_type']=='Translit']['function_name'].apply(len).mean()}")
+    print(f"Numerical functions: {acc_dict['Numerical'] / acc_dict['all']}")
+    logging.info(f"Numerical functions: {acc_dict['Numerical'] / acc_dict['all']}")
 
-# print(f"Mean len of original functions: {df[df['name_type']=='Original']['function_name'].apply(len).mean()}")
-# print(f"Mean len of GPT generated functions: {df[df['name_type']=='GPT generated']['function_name'].apply(len).mean()}")
-# print(f"Mean len of Numerical functions: {df[df['name_type']=='Numerical']['function_name'].apply(len).mean()}")
-print(f"Mean len of Translit functions: {df[df['name_type']=='Translit']['function_name'].apply(len).mean()}")
+    print(f"Translit functions: {acc_dict['Translit'] / acc_dict['all']}")
+    logging.info(f"Translit functions: {acc_dict['Translit'] / acc_dict['all']}")
 
-# Remember to close the file handler to release the resources
-logging.shutdown()
-        
+    # Remember to close the file handler to release the resources
+    logging.shutdown()
+
+if __name__ == "__main__":
+    main()
