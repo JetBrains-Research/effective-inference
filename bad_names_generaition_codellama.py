@@ -12,6 +12,7 @@ LOG_FILE = '/home/sasha/effective-inference/clean_naming/logs/accurasies.log'
 CODE_DATA_PATH = '/home/sasha/effective-inference/clean_naming/code_data.csv'
 MODEL_NAME = "codellama/CodeLlama-7b-hf"
 GENERATION_DATA_PREFIX = '/home/sasha/effective-inference/clean_naming/logs/generation_data_'
+DEBUG = 0 # 0 or
 
 df = pd.DataFrame(
         columns=['name_type', 'prompt', 'function_name', 'real', 'generated', 'answer', 'scores', 'ids',
@@ -78,7 +79,7 @@ def generation_step_next_token(i, p, name, code, type, model, tokenizer, stoppin
     return int(answer)
 
 
-def process_row(ex, name, bad_name, numerical_name, translit_name, model, tokenizer, stopping_criteria, acc_dict, fill_in_the_middle=False, line=False):
+def process_row(ex, name, bad_name, numerical_name, translit_name, llama_name, model, tokenizer, stopping_criteria, acc_dict, fill_in_the_middle=False, line=False):
     if line:
         lines = ex['code'].split('\n')
         matching_lines = [i for i, line in enumerate(lines) if re.search(fr"{name}\(", line)]
@@ -90,17 +91,20 @@ def process_row(ex, name, bad_name, numerical_name, translit_name, model, tokeni
         # print(name, bad_name, numerical_name, "\n\n")
         acc_dict['all'] += 1
 
-        acc_dict['Original'] += generation_step_next_token(i, ex['prompt'], name, ex['code'], 'Original', model, tokenizer, stopping_criteria,
-                                                           fill_in_the_middle, line)
+        # acc_dict['Original'] += generation_step_next_token(i, ex['prompt'], name, ex['code'], 'Original', model, tokenizer, stopping_criteria,
+        #                                                    fill_in_the_middle, line)
 
-        acc_dict['GPT generated'] += generation_step_next_token(i, ex['bad_prompt'], bad_name, ex['bad_code'],
-                                                                'GPT generated', model, tokenizer, stopping_criteria, fill_in_the_middle, line)
+        # acc_dict['GPT generated'] += generation_step_next_token(i, ex['bad_prompt'], bad_name, ex['bad_code'],
+        #                                                         'GPT generated', model, tokenizer, stopping_criteria, fill_in_the_middle, line)
 
-        acc_dict['Numerical'] += generation_step_next_token(i, ex['numerical_prompt'], numerical_name,
-                                                            ex['numerical_code'], 'Numerical',model, tokenizer, stopping_criteria, fill_in_the_middle, line)
+        # acc_dict['Numerical'] += generation_step_next_token(i, ex['numerical_prompt'], numerical_name,
+        #                                                     ex['numerical_code'], 'Numerical',model, tokenizer, stopping_criteria, fill_in_the_middle, line)
 
-        acc_dict['Translit'] += generation_step_next_token(i, ex['translit_prompt'], translit_name, ex['translit_code'],
-                                                           'Translit', model, tokenizer, stopping_criteria, fill_in_the_middle, line)
+        # acc_dict['Translit'] += generation_step_next_token(i, ex['translit_prompt'], translit_name, ex['translit_code'],
+        #                                                    'Translit', model, tokenizer, stopping_criteria, fill_in_the_middle, line)
+
+        acc_dict['Llama'] += generation_step_next_token(i, ex['llama_prompt'], llama_name, ex['llama_code'],
+                                                           'Llama', model, tokenizer, stopping_criteria, fill_in_the_middle, line)
 
         df.to_csv(f'/home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
         return acc_dict
@@ -114,36 +118,41 @@ def main():
 
     # Load data
     code_data = pd.read_csv(CODE_DATA_PATH, index_col=0)
-    acc_dict = {'all': 0, 'Original': 0, 'GPT generated': 0, 'Numerical': 0, 'Translit': 0}
+    acc_dict = {'all': 0, 'Llama':0} #'Original': 0, 'GPT generated': 0, 'Numerical': 0, 'Translit': 0}
 
 
     logging.info(f"---------------------------\n\n")
-    for j in tqdm(range(2, 4)):  # code_data.shape[0])):
+    for j in tqdm(range( code_data.shape[0])):
         ex = code_data.loc[j]
         prompt_names_dict = json.loads(ex['prompt_names_dict'])
         prompt_numerical_dict = json.loads(ex['prompt_numerical_dict'])
         translit_names_dict = json.loads(ex['translit_names_dict'])
+        llama_names_dict = json.loads(ex['llama_names_dict'])
 
         for name, bad_name in prompt_names_dict.items():
             numerical_name = prompt_numerical_dict[name]
             translit_name = translit_names_dict[name]
-            acc_dict = process_row(ex, name, bad_name, numerical_name, translit_name, model, tokenizer, stopping_criteria, acc_dict, fill_in_the_middle=True, line=True)
+            llama_name = llama_names_dict[name]
+            acc_dict = process_row(ex, name, bad_name, numerical_name, translit_name,llama_name,  model, tokenizer, stopping_criteria, acc_dict, fill_in_the_middle=False, line=False)
 
     logging.info(
         f'Generation info saved to file /home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
     logging.info(f"Dataset size is: {acc_dict['all']}")
     print(acc_dict)
-    print(f"Original functions: {acc_dict['Original'] / acc_dict['all']}")
-    logging.info(f"Original functions: {acc_dict['Original'] / acc_dict['all']}")
+    # print(f"Original functions: {acc_dict['Original'] / acc_dict['all']}")
+    # logging.info(f"Original functions: {acc_dict['Original'] / acc_dict['all']}")
 
-    print(f"GPT generated functions: {acc_dict['GPT generated'] / acc_dict['all']}")
-    logging.info(f"GPT generated functions: {acc_dict['GPT generated'] / acc_dict['all']}")
+    # print(f"GPT generated functions: {acc_dict['GPT generated'] / acc_dict['all']}")
+    # logging.info(f"GPT generated functions: {acc_dict['GPT generated'] / acc_dict['all']}")
 
-    print(f"Numerical functions: {acc_dict['Numerical'] / acc_dict['all']}")
-    logging.info(f"Numerical functions: {acc_dict['Numerical'] / acc_dict['all']}")
+    # print(f"Numerical functions: {acc_dict['Numerical'] / acc_dict['all']}")
+    # logging.info(f"Numerical functions: {acc_dict['Numerical'] / acc_dict['all']}")
 
-    print(f"Translit functions: {acc_dict['Translit'] / acc_dict['all']}")
-    logging.info(f"Translit functions: {acc_dict['Translit'] / acc_dict['all']}")
+    # print(f"Translit functions: {acc_dict['Translit'] / acc_dict['all']}")
+    # logging.info(f"Translit functions: {acc_dict['Translit'] / acc_dict['all']}")
+
+    print(f"Llama functions: {acc_dict['Llama'] / acc_dict['all']}")
+    logging.info(f"Llama functions: {acc_dict['Llama'] / acc_dict['all']}")
 
     # Remember to close the file handler to release the resources
     logging.shutdown()
