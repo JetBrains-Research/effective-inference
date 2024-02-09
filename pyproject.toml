@@ -9,7 +9,7 @@ packages = [{include = "effective_inference"}]
 [tool.poetry.dependencies]
 python = "3.11.3"
 transformers = {extras = ["torch"], version = "^4.34.0"}
-torch = "2.0.0"
+torch = "2.2.0"
 jupyter = "^1.0.0"
 datasets = "^2.13.1"
 scikit-learn = "^1.2.2"
@@ -29,6 +29,8 @@ accelerate = "^0.24.1"
 bitsandbytes = "^0.41.2.post2"
 huggingface-hub = {extras = ["cli"], version = "^0.19.4"}
 notebook = "^7.0.7"
+outlines = "^0.0.27"
+bz2file = "^0.98"
 
 
 [build-system]

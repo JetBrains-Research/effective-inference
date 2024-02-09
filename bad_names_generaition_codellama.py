@@ -41,7 +41,7 @@ class StoppingCriteriaSub(StoppingCriteria):
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor):
         last_token = input_ids[0][-1]
         for stop in self.stops:
-            if len(scores) > 1 and self.tokenizer.decode(stop) == self.tokenizer.decode(last_token):
+            if len(scores) > 2 and self.tokenizer.decode(stop) == self.tokenizer.decode(last_token):
                 return True
         return False
 
@@ -64,7 +64,7 @@ def generate(prompt, model, tokenizer, stopping_criteria, max_new_tokens=30):
 def generation_step_next_token(i, p, name, code, type, model, tokenizer, stopping_criteria, fill_in_the_middle=False,  line=False):
     split_string = '\n' if line else (name + "(")
     prompt = p + "\n" + split_string.join(code.split(split_string)[:i - 1]) + "<FILL_ME>"
-    real = split_string + split_string.join(code.split(split_string)[i - 1:])
+    real = code.split(split_string)[i] if line else (name)
     if line : prompt+= "\n"
     if fill_in_the_middle and '\n' in real:
         prompt += '\n' + '\n'.join(real.split("\n")[1:])
@@ -119,10 +119,13 @@ def main():
     # Load data
     code_data = pd.read_csv(CODE_DATA_PATH, index_col=0)
     acc_dict = {'all': 0, 'Llama':0} #'Original': 0, 'GPT generated': 0, 'Numerical': 0, 'Translit': 0}
-
+    fill_in_the_middle=False
+    line=True
 
     logging.info(f"---------------------------\n\n")
-    for j in tqdm(range( code_data.shape[0])):
+    logging.info(f'{"Fill in the middle" if fill_in_the_middle else "Code completion"}\n')
+    logging.info(f'{"Next Line" if line else "Next Word"}\n')
+    for j in tqdm(range(code_data.shape[0])):
         ex = code_data.loc[j]
         prompt_names_dict = json.loads(ex['prompt_names_dict'])
         prompt_numerical_dict = json.loads(ex['prompt_numerical_dict'])
@@ -133,7 +136,7 @@ def main():
             numerical_name = prompt_numerical_dict[name]
             translit_name = translit_names_dict[name]
             llama_name = llama_names_dict[name]
-            acc_dict = process_row(ex, name, bad_name, numerical_name, translit_name,llama_name,  model, tokenizer, stopping_criteria, acc_dict, fill_in_the_middle=False, line=False)
+            acc_dict = process_row(ex, name, bad_name, numerical_name, translit_name,llama_name,  model, tokenizer, stopping_criteria, acc_dict, fill_in_the_middle=fill_in_the_middle, line=line)
 
     logging.info(
         f'Generation info saved to file /home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
