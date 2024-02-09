@@ -74,6 +74,7 @@ def generation_step_next_token(i, p, name, code, type, model, tokenizer, stoppin
         answer = (name+"(") in filling
     else:
         answer = filling[:len(name)] == name
+    
     df.loc[len(df)] = {'name_type': type, 'prompt': prompt, 'function_name': name, 'real': real, 'generated': filling,
                        'answer': answer, 'scores': scores, 'ids': ids,
                        'tokenized_name': tokenizer(name, return_tensors="pt")["input_ids"].tolist()}

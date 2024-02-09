@@ -16,7 +16,7 @@ MODEL_NAME = "codellama/CodeLlama-7b-Instruct-hf"
 DEBUG = 0 # 0 or
 
 df = pd.DataFrame(
-        columns=['prompt', 'function_name', 'generated', 'scores', 'ids'])
+        columns=['prompt', 'function_name', 'generated'])
 st = time.time()
 
 
@@ -29,22 +29,11 @@ def setup_logging():
 def setup_model_and_tokenizer():
     tokenizer = ""#AutoTokenizer.from_pretrained(MODEL_NAME)
     # model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, load_in_8bit=True, device_map="auto")
-    model = outlines.models.transformers(MODEL_NAME, device={"":0}, model_kwargs = {'load_in_8bit':True})
-    return model, tokenizer
+    model = outlines.models.transformers(MODEL_NAME, model_kwargs = {'load_in_8bit':True})
+    generator = outlines.generate.text(model)
+    return generator
 
 
-class StoppingCriteriaSub(StoppingCriteria):
-    def __init__(self, tokenizer, stops=[]):
-        super().__init__()
-        self.stops = [stop.to("cuda") for stop in stops]
-        self.tokenizer = tokenizer
-
-    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor):
-        last_token = input_ids[0][-1]
-        for stop in self.stops:
-            if len(scores) > 1 and self.tokenizer.decode(stop) == self.tokenizer.decode(last_token):
-                return True
-        return False
 
 def generate(prompt, model, tokenizer, stopping_criteria, max_new_tokens=30):
     # generation
@@ -60,20 +49,18 @@ def generate(prompt, model, tokenizer, stopping_criteria, max_new_tokens=30):
 
 def generation_step_next_token(p, name, code, model, tokenizer, stopping_criteria, fill_in_the_middle=False,  line=False):
     split_string = (name + "(")
-    prompt = '[INST]Provide the function name that will replace the FILL_FUNCTION_NAME. The answer format is only the "FILL_FUNCTION_NAME".[INST]\n'+ p.replace(split_string, "FILL_FUNCTION_NAME(")+'[ANS]'
+    prompt = '[INST]Rewrite this function.[/INST]\n'+ p.replace(split_string, "FILL_FUNCTION_NAME(")+'\n[ANS]'
     print(prompt)
-    generator = outlines.generate.text(model)
-    answer = generator(prompt, max_tokens=30)
+    i = 0
+    answer = model(prompt, max_tokens=20)
+
+    while i<5 and 'def' not in answer :
+        answer = model(prompt, max_tokens=20)
+        i+=1
     
     print(answer)
 
-    # breakpoint()
-    # filling, scores, ids = generate(prompt, model, tokenizer, stopping_criteria)
-    # print(prompt)
-    # print(f'Ans: {filling} ')
-    # print(f'real: {name}')
-
-    # df.loc[len(df)] = {'prompt': prompt, 'function_name': name, 'generated': filling, 'scores': scores, 'ids': ids}
+    df.loc[len(df)] = {'prompt': prompt, 'function_name': name, 'generated': answer}
 
 
 
@@ -85,16 +72,16 @@ def process_row(ex, model, tokenizer, stopping_criteria, fill_in_the_middle=Fals
 
 def main():
     setup_logging()
-    model, tokenizer = setup_model_and_tokenizer()
+    generator = setup_model_and_tokenizer()
 
-    stopping_criteria = StoppingCriteriaList([StoppingCriteriaSub(tokenizer, stops=torch.tensor([13, 313]))])
+    stopping_criteria = ''
     # Load data
     code_data = pd.read_csv(CODE_DATA_PATH, index_col=0).reset_index()
 
     logging.info(f"---------------------------\n\n")
-    for j in tqdm(range(4)):#code_data.shape[0])):
+    for j in tqdm(range(code_data.shape[0])):
         ex = code_data.loc[j]
-        process_row(ex, model, tokenizer, stopping_criteria, fill_in_the_middle=True, line=True)
+        process_row(ex, generator, '', stopping_criteria, fill_in_the_middle=True, line=True)
        
             
     logging.info(f"LLAMA instruct names generation")
