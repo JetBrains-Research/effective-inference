@@ -11,7 +11,8 @@ import time
 import outlines
 
 LOG_FILE = '/home/sasha/effective-inference/clean_naming/logs/accurasies.log'
-CODE_DATA_PATH = '/home/sasha/effective-inference/clean_naming/functions_data.csv'
+# CODE_DATA_PATH = '/home/sasha/effective-inference/clean_naming/functions_data.csv'
+CODE_DATA_PATH = '/home/sasha/effective-inference/clean_naming/func_data_small.csv'
 MODEL_NAME = "codellama/CodeLlama-7b-Instruct-hf"
 DEBUG = 0 # 0 or
 
@@ -66,7 +67,7 @@ def generation_step_next_token(p, name, code, model, tokenizer, stopping_criteri
 
 def process_row(ex, model, tokenizer, stopping_criteria, fill_in_the_middle=False, line=False):
     
-    generation_step_next_token(ex['func_definition'],  ex['func_name'], ex['code'], model, tokenizer, stopping_criteria)
+    generation_step_next_token(ex['func_definition'],  ex['name'], '', model, tokenizer, stopping_criteria)
     df.to_csv(f'/home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
 
 
@@ -79,7 +80,7 @@ def main():
     code_data = pd.read_csv(CODE_DATA_PATH, index_col=0).reset_index()
 
     logging.info(f"---------------------------\n\n")
-    for j in tqdm(range(code_data.shape[0])):
+    for j in tqdm(range(1002, code_data.shape[0])):
         ex = code_data.loc[j]
         process_row(ex, generator, '', stopping_criteria, fill_in_the_middle=True, line=True)
        

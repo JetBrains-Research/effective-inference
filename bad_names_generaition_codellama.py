@@ -12,7 +12,7 @@ LOG_FILE = '/home/sasha/effective-inference/clean_naming/logs/accurasies.log'
 CODE_DATA_PATH = '/home/sasha/effective-inference/clean_naming/code_data.csv'
 MODEL_NAME = "codellama/CodeLlama-7b-hf"
 GENERATION_DATA_PREFIX = '/home/sasha/effective-inference/clean_naming/logs/generation_data_'
-DEBUG = 2 # 0 or n_examples for debugging
+DEBUG = 0 # 0 or n_examples for debugging
 
 
 df = pd.DataFrame(
@@ -64,16 +64,23 @@ def generate(prompt, model, tokenizer, stopping_criteria, max_new_tokens=30):
 
 def generation_step_next_token(i, p, name, code, type, model, tokenizer, stopping_criteria, fill_in_the_middle=False,  line=False):
     split_string = '\n' if line else (name + "(")
-    prompt = p + "\n" + split_string.join(code.split(split_string)[:i - 1]) + "<FILL_ME>"
-    real = code.split(split_string)[i] if line else (name)
-    if line : prompt+= "\n"
+    splitted_code = code.split(split_string)
+    prompt = p + "\n" + split_string.join(splitted_code[:i]) 
+    real = splitted_code[i] if line else (name)
+
+    if line: prompt+= '\n'
     if fill_in_the_middle and '\n' in real:
-        prompt += '\n' + '\n'.join(real.split("\n")[1:])
+        prompt += "<FILL_ME>"+'\n' + '\n'.join(real.split("\n")[1:])
     filling, scores, ids = generate(prompt, model, tokenizer, stopping_criteria)
     if line:
         answer = (name+"(") in filling
     else:
         answer = filling[:len(name)] == name
+
+    # print(prompt)
+    # print(f'_________\n{filling}')
+    # print(f'_________\n{real}')
+    
     
     df.loc[len(df)] = {'name_type': type, 'prompt': prompt, 'function_name': name, 'real': real, 'generated': filling,
                        'answer': answer, 'scores': scores, 'ids': ids,
@@ -83,9 +90,10 @@ def generation_step_next_token(i, p, name, code, type, model, tokenizer, stoppin
 
 def process_row(ex, name, bad_name, numerical_name, translit_name, llama_name, model, tokenizer, stopping_criteria, acc_dict, fill_in_the_middle=False, line=False):
     if line:
-        lines = ex['code'].split('\n')
-        matching_lines = [i for i, line in enumerate(lines) if re.search(fr"{name}\(", line)]
+        lines = ex['code'].split('\n') 
+        matching_lines = [i for i, j in enumerate(lines) if re.search(fr"{name}\(", j)]
         n_steps = matching_lines
+        
     else:
         n_steps = range(ex['prompt'].count(name + "("))
 
@@ -94,25 +102,25 @@ def process_row(ex, name, bad_name, numerical_name, translit_name, llama_name, m
         acc_dict['all'] += 1
 
         acc_dict['Original'] += generation_step_next_token(i, ex['prompt'], name, ex['code'], 'Original', model, tokenizer, stopping_criteria,
-                                                           fill_in_the_middle, line)
+                                                            fill_in_the_middle, line)
 
-        acc_dict['GPT generated'] += generation_step_next_token(i, ex['bad_prompt'], bad_name, ex['bad_code'],
-                                                                'GPT generated', model, tokenizer, stopping_criteria, fill_in_the_middle, line)
+        # acc_dict['GPT generated'] += generation_step_next_token(i, ex['bad_prompt'], bad_name, ex['bad_code'],
+        #                                                         'GPT generated', model, tokenizer, stopping_criteria, fill_in_the_middle, line)
 
-        acc_dict['Numerical'] += generation_step_next_token(i, ex['numerical_prompt'], numerical_name,
-                                                            ex['numerical_code'], 'Numerical',model, tokenizer, stopping_criteria, fill_in_the_middle, line)
+        # acc_dict['Numerical'] += generation_step_next_token(i, ex['numerical_prompt'], numerical_name,
+        #                                                     ex['numerical_code'], 'Numerical',model, tokenizer, stopping_criteria, fill_in_the_middle, line)
 
-        acc_dict['Translit'] += generation_step_next_token(i, ex['translit_prompt'], translit_name, ex['translit_code'],
-                                                           'Translit', model, tokenizer, stopping_criteria, fill_in_the_middle, line)
+        # acc_dict['Translit'] += generation_step_next_token(i, ex['translit_prompt'], translit_name, ex['translit_code'],
+        #                                                    'Translit', model, tokenizer, stopping_criteria, fill_in_the_middle, line)
 
         acc_dict['Llama'] += generation_step_next_token(i, ex['llama_prompt'], llama_name, ex['llama_code'],
                                                            'Llama', model, tokenizer, stopping_criteria, fill_in_the_middle, line)
 
-        df.to_csv(f'/home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
-        return acc_dict
+    df.to_csv(f'/home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
+    return acc_dict
 
 
-def main():
+def main(fill_in_the_middle=False, line=True):
     setup_logging()
     model, tokenizer = setup_model_and_tokenizer()
 
@@ -122,8 +130,8 @@ def main():
     code_data = pd.read_csv(CODE_DATA_PATH, index_col=0)
     n_examples = DEBUG if DEBUG else code_data.shape[0]
     acc_dict = {'all': 0, 'Llama':0, 'Original': 0, 'GPT generated': 0, 'Numerical': 0, 'Translit': 0}
-    fill_in_the_middle=False
-    line=True
+    # fill_in_the_middle=False
+    # line=True
 
     logging.info(f"---------------------------\n\n")
     logging.info(f'{"Fill in the middle" if fill_in_the_middle else "Code completion"}\n')
@@ -132,10 +140,12 @@ def main():
         code_data[i] = code_data[i].apply(json.loads)
     for j in tqdm(range(n_examples)):
         ex = code_data.loc[j]
+        if j%20==1:print(acc_dict['Llama'] / acc_dict['all'])
         for name, bad_name in ex['prompt_names_dict'].items():
             numerical_name = ex['prompt_numerical_dict'][name]
             translit_name = ex['translit_names_dict'][name]
             llama_name = ex['llama_names_dict'][name]
+
             acc_dict = process_row(ex, name, bad_name, numerical_name, translit_name,llama_name,  model, tokenizer, stopping_criteria, acc_dict, fill_in_the_middle=fill_in_the_middle, line=line)
 
     logging.info(
@@ -146,14 +156,14 @@ def main():
     print(f"Original functions: {acc_dict['Original'] / acc_dict['all']}")
     logging.info(f"Original functions: {acc_dict['Original'] / acc_dict['all']}")
 
-    print(f"GPT generated functions: {acc_dict['GPT generated'] / acc_dict['all']}")
-    logging.info(f"GPT generated functions: {acc_dict['GPT generated'] / acc_dict['all']}")
+    # print(f"GPT generated functions: {acc_dict['GPT generated'] / acc_dict['all']}")
+    # logging.info(f"GPT generated functions: {acc_dict['GPT generated'] / acc_dict['all']}")
 
-    print(f"Numerical functions: {acc_dict['Numerical'] / acc_dict['all']}")
-    logging.info(f"Numerical functions: {acc_dict['Numerical'] / acc_dict['all']}")
+    # print(f"Numerical functions: {acc_dict['Numerical'] / acc_dict['all']}")
+    # logging.info(f"Numerical functions: {acc_dict['Numerical'] / acc_dict['all']}")
 
-    print(f"Translit functions: {acc_dict['Translit'] / acc_dict['all']}")
-    logging.info(f"Translit functions: {acc_dict['Translit'] / acc_dict['all']}")
+    # print(f"Translit functions: {acc_dict['Translit'] / acc_dict['all']}")
+    # logging.info(f"Translit functions: {acc_dict['Translit'] / acc_dict['all']}")
 
     print(f"Llama functions: {acc_dict['Llama'] / acc_dict['all']}")
     logging.info(f"Llama functions: {acc_dict['Llama'] / acc_dict['all']}")
