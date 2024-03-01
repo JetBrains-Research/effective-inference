@@ -9,11 +9,11 @@ import torch
 import time
 
 LOG_FILE = '/home/sasha/effective-inference/clean_naming/logs/accurasies.log'
-CODE_DATA_PATH = '/home/sasha/effective-inference/clean_naming/code_data.csv'
+# CODE_DATA_PATH = '/home/sasha/effective-inference/clean_naming/code_data.csv'
+CODE_DATA_PATH = '/home/sasha/effective-inference/clean_naming/small_data.csv'
 MODEL_NAME = "codellama/CodeLlama-7b-hf"
 GENERATION_DATA_PREFIX = '/home/sasha/effective-inference/clean_naming/logs/generation_data_'
 DEBUG = 0 # 0 or n_examples for debugging
-
 
 df = pd.DataFrame(
         columns=['name_type', 'prompt', 'function_name', 'real', 'generated', 'answer', 'scores', 'ids',
@@ -50,6 +50,9 @@ def generate(prompt, model, tokenizer, stopping_criteria, max_new_tokens=30):
     # generation
     model.config.forced_eos_token_id = [13]
     input_ids = tokenizer(prompt, return_tensors="pt")["input_ids"].to('cuda')
+    if input_ids.shape[-1] > 2000:
+        return 'none', [], []
+    print(input_ids.shape)
     labels = torch.tensor([1]).unsqueeze(0)
     generated_ids = model.generate(input_ids, max_new_tokens=max_new_tokens, labels=labels,
                                    return_dict_in_generate=True, output_scores=True,
@@ -98,6 +101,7 @@ def process_row(ex, name, bad_name, numerical_name, translit_name, llama_name, m
         n_steps = range(ex['prompt'].count(name + "("))
 
     for i in n_steps:
+
         # print(name, bad_name, numerical_name, "\n\n")
         acc_dict['all'] += 1
 
@@ -136,17 +140,24 @@ def main(fill_in_the_middle=False, line=True):
     logging.info(f"---------------------------\n\n")
     logging.info(f'{"Fill in the middle" if fill_in_the_middle else "Code completion"}\n')
     logging.info(f'{"Next Line" if line else "Next Word"}\n')
-    for i in ['prompt_names_dict', 'prompt_numerical_dict', 'translit_names_dict' ,'llama_names_dict' ]:
+    for i in ['llama_names_dict' ]:# ['prompt_names_dict', 'prompt_numerical_dict', 'translit_names_dict' ,'llama_names_dict' ]
         code_data[i] = code_data[i].apply(json.loads)
     for j in tqdm(range(n_examples)):
         ex = code_data.loc[j]
-        if j%20==1:print(acc_dict['Llama'] / acc_dict['all'])
-        for name, bad_name in ex['prompt_names_dict'].items():
-            numerical_name = ex['prompt_numerical_dict'][name]
-            translit_name = ex['translit_names_dict'][name]
-            llama_name = ex['llama_names_dict'][name]
+        if j%20==1: print(acc_dict['Llama'] / acc_dict['all'])
+        # for name, bad_name in ex['prompt_names_dict'].items():
+        #     # numerical_name = ex['prompt_numerical_dict'][name]
+        #     # translit_name = ex['translit_names_dict'][name]
+        #     llama_name = ex['llama_names_dict'][name]
 
-            acc_dict = process_row(ex, name, bad_name, numerical_name, translit_name,llama_name,  model, tokenizer, stopping_criteria, acc_dict, fill_in_the_middle=fill_in_the_middle, line=line)
+            # acc_dict = process_row(ex, name, bad_name, numerical_name, translit_name,llama_name,  model, tokenizer, stopping_criteria, acc_dict, fill_in_the_middle=fill_in_the_middle, line=line)
+        # for name, llama_name in ex['llama_names_dict'].items():
+            # numerical_name = ex['prompt_numerical_dict'][name]
+            # translit_name = ex['translit_names_dict'][name]
+            # llama_name = ex['llama_names_dict'][name]
+            # acc_dict = process_row(ex, name, '', '', '',llama_name,  model, tokenizer, stopping_criteria, acc_dict, fill_in_the_middle=fill_in_the_middle, line=line)
+        name, llama_name = ex['target_function'], ex['llama_names_dict'][ex['target_function']]
+        acc_dict = process_row(ex, name, '', '', '',llama_name,  model, tokenizer, stopping_criteria, acc_dict, fill_in_the_middle=fill_in_the_middle, line=line)
 
     logging.info(
         f'Generation info saved to file /home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')

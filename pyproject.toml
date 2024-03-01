@@ -7,7 +7,7 @@ readme = "README.md"
 packages = [{include = "effective_inference"}]
 
 [tool.poetry.dependencies]
-python = "3.11.3"
+python = "3.10.3"
 transformers = {extras = ["torch"], version = "^4.34.0"}
 torch = "2.2.0"
 jupyter = "^1.0.0"

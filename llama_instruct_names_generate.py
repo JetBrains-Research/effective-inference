@@ -12,7 +12,7 @@ import outlines
 
 LOG_FILE = '/home/sasha/effective-inference/clean_naming/logs/accurasies.log'
 # CODE_DATA_PATH = '/home/sasha/effective-inference/clean_naming/functions_data.csv'
-CODE_DATA_PATH = '/home/sasha/effective-inference/clean_naming/func_data_small.csv'
+CODE_DATA_PATH = '/home/sasha/effective-inference/clean_naming/small_func_data.csv'
 MODEL_NAME = "codellama/CodeLlama-7b-Instruct-hf"
 DEBUG = 0 # 0 or
 
@@ -38,8 +38,9 @@ def setup_model_and_tokenizer():
 
 def generate(prompt, model, tokenizer, stopping_criteria, max_new_tokens=30):
     # generation
-
+    print(len(prompt))
     input_ids = torch.tensor(tokenizer(prompt)["input_ids"]).unsqueeze(0).to('cuda')
+    print(input_ids.shape())
     generated_ids = model.generate(input_ids, max_new_tokens=max_new_tokens,
                                    return_dict_in_generate=True, output_scores=True)
     filling = tokenizer.batch_decode(generated_ids.sequences[:, input_ids.shape[1]:], skip_special_tokens=True)[0]
@@ -51,11 +52,11 @@ def generate(prompt, model, tokenizer, stopping_criteria, max_new_tokens=30):
 def generation_step_next_token(p, name, code, model, tokenizer, stopping_criteria, fill_in_the_middle=False,  line=False):
     split_string = (name + "(")
     prompt = '[INST]Rewrite this function.[/INST]\n'+ p.replace(split_string, "FILL_FUNCTION_NAME(")+'\n[ANS]'
-    print(prompt)
     i = 0
     answer = model(prompt, max_tokens=20)
 
     while i<5 and 'def' not in answer :
+        
         answer = model(prompt, max_tokens=20)
         i+=1
     
@@ -67,7 +68,7 @@ def generation_step_next_token(p, name, code, model, tokenizer, stopping_criteri
 
 def process_row(ex, model, tokenizer, stopping_criteria, fill_in_the_middle=False, line=False):
     
-    generation_step_next_token(ex['func_definition'],  ex['name'], '', model, tokenizer, stopping_criteria)
+    generation_step_next_token(ex['func_definition'],  ex['func_name'], '', model, tokenizer, stopping_criteria)
     df.to_csv(f'/home/sasha/effective-inference/clean_naming/logs/generation_data_{st}.csv')
 
 
@@ -78,9 +79,9 @@ def main():
     stopping_criteria = ''
     # Load data
     code_data = pd.read_csv(CODE_DATA_PATH, index_col=0).reset_index()
-
+    n_examples = DEBUG if DEBUG else code_data.shape[0]
     logging.info(f"---------------------------\n\n")
-    for j in tqdm(range(1002, code_data.shape[0])):
+    for j in tqdm(range(n_examples)):
         ex = code_data.loc[j]
         process_row(ex, generator, '', stopping_criteria, fill_in_the_middle=True, line=True)
        
